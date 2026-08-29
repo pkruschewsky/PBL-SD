@@ -203,28 +203,26 @@ module DE1_SOC_golden_top(
 //  Structural coding
 //=======================================================
 
-	// Nucleo grafico (motor de background) -> saida VGA
-	// reset ativo alto: KEY[0] na placa e ativo baixo, entao inverte
-	top_video u_top_video (
-		.CLOCK_50    (CLOCK_50),
-		.reset       (~KEY[0]),
-		
-		.btn_write   (KEY[1]), 
+	  top_video u_top_video (
+        .CLOCK_50     (CLOCK_50),
+        .reset        (~KEY[0]),
+        
+        .btn_write    (KEY[1]), 
+        .KEY_move_dir (KEY[2]),      // <-- CONECTA O BOTÃO 2 AQUI
+        .KEY_move_esq (KEY[3]),      // <-- CONECTA O BOTÃO 3 AQUI
 
-		// scroll fixo em 0 por enquanto (teste parado);
-		// depois mapear em SW ou em registrador MMIO
-		.SW_scroll_x (9'd0),
-		.SW_scroll_y (8'd0),
-		.SW_in(SW[9:0]),
+        .SW_scroll_x  (9'd0),
+        .SW_scroll_y  (8'd0),
+        .SW_in        (SW[9:0]),
 
-		.VGA_R       (VGA_R),
-		.VGA_G       (VGA_G),
-		.VGA_B       (VGA_B),
-		.VGA_HS      (VGA_HS),
-		.VGA_VS      (VGA_VS),
-		.VGA_CLK     (VGA_CLK),
-		.VGA_SYNC_N  (VGA_SYNC_N),
-		.VGA_BLANK_N (VGA_BLANK_N)
-	);
+        .VGA_R        (VGA_R),
+        .VGA_G        (VGA_G),
+        .VGA_B        (VGA_B),
+        .VGA_HS       (VGA_HS),
+        .VGA_VS       (VGA_VS),
+        .VGA_CLK      (VGA_CLK),
+        .VGA_SYNC_N   (VGA_SYNC_N),
+        .VGA_BLANK_N  (VGA_BLANK_N)
+    );
 
 endmodule

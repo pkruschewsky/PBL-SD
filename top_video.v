@@ -5,10 +5,14 @@
 module top_video (
     input  wire        CLOCK_50,    
     input  wire        reset,       
-    
-    input  wire        btn_write,   // <-- Sinal do botão vindo do DE1_SOC_golden_top
-	 input  wire [9:0]  SW_in,       // <-- Alterado para receber as 10 chaves
+	 
+    input  wire        btn_write,    // <-- KEY[1]
+    input  wire        KEY_move_dir, // <-- KEY[2]
+    input  wire        KEY_move_esq, // <-- KEY[3]
+    input  wire [9:0]  SW_in,       
 
+    input  wire [8:0]  SW_scroll_x, 
+    input  wire [7:0]  SW_scroll_y,
     input  wire [8:0]  SW_scroll_x, 
     input  wire [7:0]  SW_scroll_y, 
 
@@ -65,47 +69,88 @@ module top_video (
 	 // =========================================================
     // LÓGICA DO BOTÃO E REGISTRADORES DO POLÍGONO Requisito 4.5
     // =========================================================
-reg key1_r1, key1_r2;
+// =========================================================
+    // LÓGICA DE TESTE INDIVIDUAL MULTIPLEXADO (Rasterizadores)
+    // =========================================================
+    reg key1_r1, key1_r2, key2_r1, key2_r2, key3_r1, key3_r2;
     always @(posedge clk25) begin
-        key1_r1 <= ~btn_write;      
-        key1_r2 <= key1_r1;
+        key1_r1 <= ~btn_write;      key1_r2 <= key1_r1;
+        key2_r1 <= ~KEY_move_dir;   key2_r2 <= key2_r1; 
+        key3_r1 <= ~KEY_move_esq;   key3_r2 <= key3_r1; 
     end
     wire key1_press = (key1_r1 & ~key1_r2); 
+    wire key2_press = (key2_r1 & ~key2_r2); 
+    wire key3_press = (key3_r1 & ~key3_r2); 
 
-    reg [1:0] poly_modo;
-    reg [8:0] poly_x0, poly_x1, poly_x2;
-    reg [7:0] poly_y0, poly_y1, poly_y2;
-    reg [7:0] poly_cor;
+    // Registradores Independentes (Visibilidade, Posição âncora, Cor)
+    reg ret_en, tri_en;
+    reg [8:0] ret_x, tri_x;
+    reg [7:0] ret_y, tri_y;
+    reg [7:0] ret_cor, tri_cor;
 
-    // Largura e altura fixas para teste de translação do retângulo (ex: 150x100 pixels)
-    parameter [8:0] RET_LARGURA = 9'd150;
-    parameter [7:0] RET_ALTURA  = 8'd100;
+    // Tamanhos fixos para evitar distorção
+    parameter [8:0] RET_W = 9'd80;   parameter [7:0] RET_H = 8'd40;
+    parameter [8:0] TRI_BX = 9'd40;  parameter [7:0] TRI_HY = 8'd60; // 40 pra cada lado, 60 de altura
 
     always @(posedge clk25 or posedge reset) begin
         if (reset) begin
-            poly_modo <= 2'd1;     // 1 = Retângulo
-            poly_x0   <= 9'd50;    poly_y0   <= 8'd50;
-            // X1 e Y1 são calculados automaticamente com base na largura/altura
-            poly_x1   <= 9'd50 + RET_LARGURA;   
-            poly_y1   <= 8'd50 + RET_ALTURA;
-            poly_x2   <= 9'd0;     poly_y2   <= 8'd0;
-            poly_cor  <= 8'd5;
-        end else if (key1_press) begin
-            case (SW_in[9:7])
-                3'b000: begin // Comando 0: Move a âncora X (X0), arrastando X1 junto para manter o tamanho
-                    poly_x0 <= {1'b0, SW_in[7:0]};
-                    poly_x1 <= {1'b0, SW_in[7:0]} + RET_LARGURA;
+            ret_en <= 1'b1;  ret_x <= 9'd50;  ret_y <= 8'd50;  ret_cor <= 8'd5;
+            tri_en <= 1'b1;  tri_x <= 9'd200; tri_y <= 8'd100; tri_cor <= 8'd15;
+        end else begin
+            // Aplica Cor e Visibilidade (KEY[1])
+            if (key1_press) begin
+                if (SW_in[9] == 1'b0) begin ret_cor <= {1'b0, SW_in[6:0]}; ret_en <= SW_in[7]; end
+                else                  begin tri_cor <= {1'b0, SW_in[6:0]}; tri_en <= SW_in[7]; end
+            end
+            
+            // Movimentação +5 (KEY[2])
+            else if (key2_press) begin
+                if (SW_in[9] == 1'b0) begin
+                    if (SW_in[8] == 1'b0) ret_x <= ret_x + 9'd5; else ret_y <= ret_y + 8'd5;
+                end else begin
+                    if (SW_in[8] == 1'b0) tri_x <= tri_x + 9'd5; else tri_y <= tri_y + 8'd5;
                 end
-                3'b001: begin // Comando 1: Move a âncora Y (Y0), arrastando Y1 junto
-                    poly_y0 <= SW_in[7:0];
-                    poly_y1 <= SW_in[7:0] + RET_ALTURA;
+            end
+            
+            // Movimentação -5 (KEY[3])
+            else if (key3_press) begin
+                if (SW_in[9] == 1'b0) begin
+                    if (SW_in[8] == 1'b0) ret_x <= ret_x - 9'd5; else ret_y <= ret_y - 8'd5;
+                end else begin
+                    if (SW_in[8] == 1'b0) tri_x <= tri_x - 9'd5; else tri_y <= tri_y - 8'd5;
                 end
-                3'b100: poly_modo <= SW_in[1:0];         // Comando 4: Muda Modo
-                3'b101: poly_cor  <= SW_in[7:0];         // Comando 5: Muda Cor
-                default: ;
-            endcase
+            end
         end
     end
+
+    // =========================================================
+    // INSTANCIAÇÃO DE MÚLTIPLOS RASTERIZADORES
+    // =========================================================
+    wire ret_hit, tri_hit;
+    wire [7:0] ret_c_out, tri_c_out;
+
+    // 1. Retângulo 
+    rasterizador_poligonos rast_retangulo (
+        .clk(clk25), .jogo_x(next_x[9:1]), .jogo_y(next_y[9:1]), 
+        .modo_ativo(2'd1),  
+        .x0(ret_x), .y0(ret_y), .x1(ret_x + RET_W), .y1(ret_y + RET_H), .x2(9'd0), .y2(8'd0),
+        .cor_indice(ret_cor), .poly_ativo(ret_hit), .poly_color(ret_c_out)
+    );
+
+    // 2. Triângulo (Cálculo automático dos 3 vértices a partir do centro/topo)
+    rasterizador_poligonos rast_triangulo (
+        .clk(clk25), .jogo_x(next_x[9:1]), .jogo_y(next_y[9:1]), 
+        .modo_ativo(2'd2),  
+        .x0(tri_x), .y0(tri_y), 
+        .x1(tri_x + TRI_BX), .y1(tri_y + TRI_HY), // Base direita
+        .x2(tri_x - TRI_BX), .y2(tri_y + TRI_HY), // Base esquerda
+        .cor_indice(tri_cor), .poly_ativo(tri_hit), .poly_color(tri_c_out)
+    );
+
+    // Unifica os dois sinais antes de mandar para o pipeline de atraso
+    assign poly_ativo_imediato = (ret_hit & ret_en) | (tri_hit & tri_en);
+    // Prioridade visual: Triângulo fica por cima do Retângulo se colidirem
+    assign poly_color_imediato = (tri_hit & tri_en) ? tri_c_out : (ret_hit & ret_en ? ret_c_out : 8'd0);
 
     // =========================================================
     // SINAIS DE INTERCONEXÃO 
