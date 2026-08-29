@@ -1,0 +1,23 @@
+# Backups
+*.bak
+
+# Arquivos temporários
+*.tmp
+*.log
+
+# Banco de dados gerado pelo Quartus
+db/
+incremental_db/
+
+# Arquivos temporários do Quartus
+greybox_tmp/
+
+# Resultados da compilação
+output_files/
+
+# Workspace do Quartus
+*.qws
+
+# Configurações de IDE
+.vscode/
+.idea/
