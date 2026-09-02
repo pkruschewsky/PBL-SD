@@ -47,7 +47,7 @@ O `vga_driver` atua como o coração temporal do sistema. Seu papel é garantir 
 
 *   **Entradas:** Recebe o `clock` reduzido de 25 MHz (padrão para 640x480 a 60 Hz), o sinal de `reset`, e a cor final processada `color_in` no formato de 8 bits (RRRGGGBB).
 *   **Processamento:** Utiliza uma máquina de estados e contadores horizontais (`h_counter`) e verticais (`v_counter`) para simular o comportamento de um monitor CRT. Ele percorre as zonas ativas (onde há imagem) e as zonas mortas (*Front Porch*, *Sync Pulse* e *Back Porch*) para gerar os pulsos de sincronismo `hsync` e `vsync`.
-*   **Saídas:** Exporta os sinais analógicos `red`, `green`, `blue` e os sincronismos para os pinos da placa[cite: 20]. Fundamentalmente, exporta as coordenadas `next_x` e `next_y`, avisando aos demais blocos qual pixel será renderizado no próximo ciclo de *clock*[cite: 20].
+*   **Saídas:** Exporta os sinais analógicos `red`, `green`, `blue` e os sincronismos para os pinos da placa. Fundamentalmente, exporta as coordenadas `next_x` e `next_y`, avisando aos demais blocos qual pixel será renderizado no próximo ciclo de *clock*.
 
 **Trecho de Código Principal (Geração de Coordenadas):**
 ```verilog
@@ -72,8 +72,8 @@ end
 
 Este módulo renderiza uma malha contínua de cenários formada por blocos de texturas (*tiles*) de 8x8 pixels.
 
-*   **Entradas:** Recebe as coordenadas `next_x` e `next_y` e os deslocamentos de câmera `scroll_x` e `scroll_y`[cite: 6]. Além disso, possui uma interface de escrita (`tm_wr_en`, `tm_wr_addr`, `tm_wr_data`) para modificar a fase do jogo em tempo real.
-*   **Processamento:** O motor converte a resolução física 640x480 para lógica (deslocando 1 bit das coordenadas para a direita) e soma o valor de *scroll*. O sistema recicla as coordenadas (*wrap-around*) usando lógica de módulo (ex: `scrolled_x_full >= 320`) para dar a ilusão de um mundo infinito. O endereço do tile (linha e coluna) é enviado à RAM Dual-Port (`ram_tilemap.v`), que devolve o ID do bloco[cite: 6, 10]. Esse ID, somado à posição do pixel interno do bloco, consulta a ROM (`rom_cenario_tile.v`).
+*   **Entradas:** Recebe as coordenadas `next_x` e `next_y` e os deslocamentos de câmera `scroll_x` e `scroll_y`. Além disso, possui uma interface de escrita (`tm_wr_en`, `tm_wr_addr`, `tm_wr_data`) para modificar a fase do jogo em tempo real.
+*   **Processamento:** O motor converte a resolução física 640x480 para lógica (deslocando 1 bit das coordenadas para a direita) e soma o valor de *scroll*. O sistema recicla as coordenadas (*wrap-around*) usando lógica de módulo (ex: `scrolled_x_full >= 320`) para dar a ilusão de um mundo infinito. O endereço do tile (linha e coluna) é enviado à RAM Dual-Port (`ram_tilemap.v`), que devolve o ID do bloco. Esse ID, somado à posição do pixel interno do bloco, consulta a ROM (`rom_cenario_tile.v`).
 *   **Saídas:** A cor específica do pixel daquele tile (`cor_pixel`) e o endereço de memória para consulta da textura compartilhada (`rom_addr`).
 
 **Trecho de Código Principal (Matemática Espacial e Paginação):**
@@ -102,7 +102,7 @@ wire [10:0] tilemap_addr = (tile_row * 11'd40) + tile_col;
 ```
 #### 1.3.3 Rasterizador de Polígonos (`rasterizador_poligonos.v`)
 
-Este módulo é o hardware responsável por desenhar formas geométricas preenchidas (retângulos e triângulos) diretamente na tela, testando se o pixel atual pertence à área da forma[cite: 12].
+Este módulo é o hardware responsável por desenhar formas geométricas preenchidas (retângulos e triângulos) diretamente na tela, testando se o pixel atual pertence à área da forma.
 
 *   **Entradas:** Coordenadas lógicas da tela (`jogo_x`, `jogo_y`), seletor de forma (`modo_ativo`), as coordenadas dos vértices (`x0`, `y0` até `x2`, `y2`) e a cor desejada (`cor_indice`).
 *   **Processamento:** Para o retângulo, o hardware utiliza comparadores lógicos simples (verificando se X e Y estão entre as bordas). Para o triângulo, utiliza-se a Função de Aresta (*Edge Function*). Para corrigir erros de *underflow* (estouro de bit) durante a subtração geométrica, as coordenadas de entrada de 9/8 bits sem sinal são convertidas para 11 bits com sinal (`signed`) preenchendo com zeros à esquerda. Isso garante diferenças seguras de 12 bits e cálculos de área precisos de 24 bits.
