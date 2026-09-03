@@ -1,7 +1,7 @@
 // ============================================================================
 // motor_background.v
 // Le a posicao logica do pixel, aplica scroll, consulta o tilemap e 
-// envia o endereço para a ROM Dual-Port externa.
+// envia o endereco para a ROM de cenario externa.
 // ============================================================================
 module motor_background (
     input  wire        clk,
@@ -14,7 +14,7 @@ module motor_background (
     input  wire [10:0] tm_wr_addr,
     input  wire [7:0]  tm_wr_data,
 
-    // Conexão com a ROM Externa (Dual-Port)
+    // Conexao com a ROM de cenario (1 porta)
     output wire [13:0] rom_addr, 
     input  wire [7:0]  rom_data, 
 
@@ -55,10 +55,11 @@ module motor_background (
         pixel_y_r <= pixel_y;
     end
 
-    // Manda o endereço para a Porta A da ROM lá no top_video
+    // Endereco para a ROM de cenario: tile_id define o tile, os 6 bits
+    // baixos selecionam o pixel dentro dele (8x8)
     assign rom_addr = {tile_id, pixel_y_r, pixel_x_r};
 
-    // A cor final recebe o dado que voltou da ROM
+    // Cor final recebida da ROM
     assign cor_pixel = rom_data;
 
 endmodule

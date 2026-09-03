@@ -207,9 +207,9 @@ module DE1_SOC_golden_top(
         .CLOCK_50     (CLOCK_50),
         .reset        (~KEY[0]),
         
-        .btn_write    (KEY[1]), 
-        .KEY_move_dir (KEY[2]),      // <-- CONECTA O BOTÃO 2 AQUI
-        .KEY_move_esq (KEY[3]),      // <-- CONECTA O BOTÃO 3 AQUI
+        .btn_write    (KEY[1]),     // confirma / aplica o campo atual
+        .KEY_move_dir (KEY[2]),      // incrementa / move na direcao positiva
+        .KEY_move_esq (KEY[3]),      // decrementa / move na direcao negativa
 
         .SW_scroll_x  (9'd0),
         .SW_scroll_y  (8'd0),
