@@ -20,4 +20,6 @@ output_files/
 
 # Configurações de IDE
 .vscode/
-.idea/rasterizador_poligonos_antigo.v
+.idea/
+
+rasterizador_poligonos_antigo.v
