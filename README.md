@@ -223,15 +223,15 @@ Os requisitos abaixo seguem a numeração original do enunciado (Problema #1, se
 ---
 
 ## 7. Verificação Funcional (Demonstração em Bancada)
-
+ 
 Como descrito na seção 6, a verificação deste primeiro problema foi conduzida por **demonstração dirigida em hardware**, usando as chaves (`SW`) e botões (`KEY`) da placa como estímulo de teste, e não por testbenches automatizados em simulação. O modo ativo é sempre selecionado por `SW[9:8]`, roteado combinacionalmente pelo módulo `mef_demonstracao.v`. Os registradores de cada camada (posição dos polígonos, conteúdo do *tilemap*, *scroll*) **não são reiniciados ao trocar de modo** — só voltam ao padrão com `KEY[0]` (reset) — o que permite configurar uma camada, mudar de modo, e ainda ver o resultado anterior compondo com as demais camadas.
-
+ 
 ### 7.1 Modo `00` — Ocioso (IDLE)
-
+ 
 Todas as saídas de controle ficam em repouso. Nenhuma chave ou botão tem efeito sobre o conteúdo das camadas; usado para verificar a saída de vídeo estável logo após o reset (`KEY[0]`).
-
+ 
 ### 7.2 Modo `01` — Background
-
+ 
 | Controle | Função | Faixa / passo |
 |---|---|---|
 | `SW[7] = 0` | Ativa o **modo edição** de tile | — |
@@ -243,9 +243,9 @@ Todas as saídas de controle ficam em repouso. Nenhuma chave ou botão tem efeit
 | `SW[6] = 0` (modo scroll) | Seleciona rolagem no eixo X | — |
 | `SW[6] = 1` (modo scroll) | Seleciona rolagem no eixo Y | — |
 | `KEY[2]` / `KEY[3]` (modo scroll) | Incrementa / decrementa o deslocamento de câmera no eixo selecionado | ±2 pixels lógicos por pulso |
-
+ 
 ### 7.3 Modo `10` — Polígonos
-
+ 
 | Controle | Função | Faixa / passo |
 |---|---|---|
 | `SW[7] = 0` | Seleciona o **retângulo** como forma ativa | — |
@@ -256,25 +256,31 @@ Todas as saídas de controle ficam em repouso. Nenhuma chave ou botão tem efeit
 | `KEY[3]` | Move a forma ativa no sentido negativo do eixo selecionado | −5 pixels lógicos por pulso |
 | `SW[5:0]` | Valor de cor a gravar na forma ativa | `0`–`63` — os 2 bits mais significativos do índice de cor são forçados a `0` na escrita (`{2'b00, SW[5:0]}`), então apenas 64 dos 256 índices de cor são alcançáveis por este controle |
 | `KEY[1]` | Grava o valor de `SW[5:0]` como cor da forma ativa | — |
-
+ 
 *Retângulo padrão após reset:* 80×40 pixels lógicos, cor índice 5, posição inicial (50, 50).
 *Triângulo padrão após reset:* base 80 / altura 60 pixels lógicos, cor índice 15, posição inicial (200, 100).
-
+ 
 ### 7.4 Modo `11` — Sprites
-
+ 
+Nesta atualização, o `controlador_sprite.v` passou a gerenciar **4 sprites controláveis** (`id_alvo` 0–3) em paralelo, cada um com posição, personagem e espelhamento próprios guardados internamente no controlador. `SW[5:4]` escolhe qual desses 4 sprites recebe os comandos no momento — os outros três permanecem parados na última posição configurada, o que permite posicionar vários sprites em pontos diferentes da tela ao longo da demonstração.
+ 
+| Controle | Função em modo movimento (`SW[7] = 0`) | Função em modo espelhamento (`SW[7] = 1`) |
+|---|---|---|
+| `SW[3]` | Move o sprite selecionado para **cima** | Liga o espelhamento vertical (`flip_y = 1`) |
+| `SW[2]` | Move o sprite selecionado para **baixo** | Desliga o espelhamento vertical (`flip_y = 0`) |
+| `SW[1]` | Move o sprite selecionado para **esquerda** | Liga o espelhamento horizontal (`flip_x = 1`) |
+| `SW[0]` | Move o sprite selecionado para **direita** | Desliga o espelhamento horizontal (`flip_x = 0`) |
+ 
 | Controle | Função | Faixa / passo |
 |---|---|---|
-| `SW[7]` = 1 | Trava o movimento para mostrar o espelhamento | — |
-| `SW[7]` = 0 | Habilita o movimento | — |
-| `SW[0]` | Move o sprite continuamente para a **direita**, enquanto mantida em nível alto | — |
-| `SW[1]` | Move o sprite continuamente para a **esquerda** | — |
-| `SW[2]` | Move o sprite continuamente para **baixo** | — |
-| `SW[3]` | Move o sprite continuamente para **cima** | — |
-| `SW[5:4]` | Seleciona o personagem da tela que irá se mover | — |
-| `SW[6]` | Muda o sprite do personagem móvel | — |
-
-Notas de comportamento, verificadas diretamente no `controlador_sprite.v`:
-- O movimento é por **nível de chave**, não por pulso de botão — os botões físicos ficam livres neste modo.
-- Velocidade fixa de deslocamento: ~20 passos por segundo (`SPEED_LIMIT = 1.250.000` ciclos de `clk25`, ou seja, um passo a cada 50 ms).
-- A posição é limitada por *hardware* aos limites da tela lógica menos o tamanho do sprite: `X ∈ [0, 304]`, `Y ∈ [0, 224]` (320×240 − 16×16).
-- Fora do modo `11`, o sprite fica parado (`spr_d` zerado pela MEF), mas continua visível na posição em que estava — por isso o compositor consegue mostrar, no fechamento da demonstração, o sprite sobreposto ao *background* editado e aos polígonos movidos nos modos anteriores, sem precisar voltar a eles.
+| `SW[5:4]` | Seleciona qual dos 4 sprites (`id_alvo`) recebe os comandos de `SW[3:0]` | `0`–`3` |
+| `SW[7]` | Alterna entre modo movimento (`0`) e modo espelhamento (`1`) para o sprite selecionado — reaproveita os mesmos bits `SW[3:0]`, não é uma trava independente | — |
+| `SW[6]` | Avança o personagem do sprite selecionado, **por borda de subida** (é preciso abaixar e levantar a chave a cada passo, não basta deixá-la levantada) | `0`–`6` (7 personagens), volta a `0` após `6` |
+ 
+Notas de comportamento, verificadas diretamente no `controlador_sprite.v` e no `motor_sprites.v`:
+- O movimento/espelhamento é processado a ~20 Hz (`SPEED_LIMIT = 1.250.000` ciclos de `clk25`, um passo a cada 50 ms); cada passo de movimento é de **1 pixel lógico**.
+- A troca de personagem (`SW[6]`) tem prioridade sobre o movimento/espelhamento quando os dois acontecem no mesmo instante.
+- A posição de cada sprite é limitada por *hardware* aos limites da tela lógica menos o tamanho do sprite: `X ∈ [0, 304]`, `Y ∈ [0, 224]` (320×240 − 16×16).
+- Ao resetar (`KEY[0]`), os 4 sprites já nascem posicionados e habilitados: sprite 0 (jogador, personagem 0) em (100, 100); sprites 1–3 (personagens 1, 2 e 4, representando inimigos parados) em (200, 50), (50, 150) e (250, 180), respectivamente — os valores de reset em `motor_sprites.v` e `controlador_sprite.v` foram conferidos e são consistentes entre si.
+- A prioridade de sobreposição entre os 4 sprites segue a mesma regra da seção 5.2 (menor índice vence): sprite 0 > sprite 1 > sprite 2 > sprite 3.
+- Fora do modo `11`, os sprites ficam parados (`spr_d` zerado pela MEF) nas últimas posições configuradas — por isso o compositor consegue mostrar, no fechamento da demonstração, os sprites sobrepostos ao *background* editado e aos polígonos movidos nos modos anteriores, sem precisar voltar a eles.
