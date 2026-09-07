@@ -284,3 +284,40 @@ Notas de comportamento, verificadas diretamente no `controlador_sprite.v` e no `
 - Ao resetar (`KEY[0]`), os 4 sprites já nascem posicionados e habilitados: sprite 0 (jogador, personagem 0) em (100, 100); sprites 1–3 (personagens 1, 2 e 4, representando inimigos parados) em (200, 50), (50, 150) e (250, 180), respectivamente — os valores de reset em `motor_sprites.v` e `controlador_sprite.v` foram conferidos e são consistentes entre si.
 - A prioridade de sobreposição entre os 4 sprites segue a mesma regra da seção 5.2 (menor índice vence): sprite 0 > sprite 1 > sprite 2 > sprite 3.
 - Fora do modo `11`, os sprites ficam parados (`spr_d` zerado pela MEF) nas últimas posições configuradas — por isso o compositor consegue mostrar, no fechamento da demonstração, os sprites sobrepostos ao *background* editado e aos polígonos movidos nos modos anteriores, sem precisar voltar a eles.
+
+## 8. Recursos, Timing, Desempenho e Limitações
+ 
+### 8.1 Utilização de recursos da FPGA
+ 
+Números extraídos do relatório de compilação (`.fit.summary`) para o dispositivo `5CSEMA5F31C6`:
+ 
+| Recurso | Utilizado | Disponível | % |
+|---|---|---|---|
+| ALMs (*Adaptive Logic Modules*) | 279 | 32.070 | <1% |
+| Registradores | 213 | — | — |
+| Bits de memória de bloco (M10K) | 157.056 | 4.065.280 | 4% |
+| Blocos de RAM (M10K) | 20 | 397 | 5% |
+| Blocos DSP | 3 | 87 | 3% |
+| PLLs | 0 | 6 | 0% |
+| Pinos de I/O | 241 | 457 | 53% |
+ 
+O projeto usa uma fração pequena da capacidade lógica e de memória da Cyclone V — a maior parte da ocupação de recursos vem das ROMs de tile/sprite e da RAM do *tilemap*, não da lógica de controle. Os 3 blocos DSP são consumidos pelas multiplicações do rasterizador de polígonos (produto vetorial das funções de aresta) e pelo cálculo de `tilemap_addr = tile_row × 40`. Nenhum PLL é usado — o clock de vídeo é gerado por divisão simples (`clock_divider.v`), não por síntese de frequência.
+ 
+### 8.2 Análise de timing (TimeQuest, pós-correção do arquivo `.sdc`)
+ 
+| Clock | Período / Frequência | Setup slack | Hold slack | Pulse Width slack |
+|---|---|---|---|---|
+| `CLOCK_50` (base) | 20,000 ns / 50 MHz | +17,495 ns | -0,125 ns | +8,722 ns |
+| `clk25` (gerado, `÷2` de `CLOCK_50`) | 40,000 ns / 25 MHz | +26,049 ns | +0,011 ns | +18,782 ns |
+ 
+O fechamento de timing é confortável nos dois domínios de clock: as folgas de *setup* são grandes (17-26 ns de margem sobre um período de 20-40 ns), o que indica que o *datapath* opera com bastante espaço acima dos 25/50 MHz exigidos. O *design-wide TNS* (soma total de violações) é zero em setup, confirmando que não há caminho de dados violando o requisito de tempo de estabelecimento em nenhum dos dois clocks.
+ 
+**Violação isolada de *hold* em `CLOCK_50` (-0,125 ns, 1 caminho):** diferente de uma violação de *setup*, uma violação de *hold* não é corrigida reduzindo a frequência do clock — ela indica que um dado pode chegar rápido demais em relação à borda de captura. O único registrador do projeto que opera no domínio `CLOCK_50` (sem divisão) é o próprio flip-flop de *toggle* dentro do `clock_divider.v` (`clk_out <= ~clk_out`); todos os demais registradores do *datapath* já operam em `clk25`. Isso é consistente com uma violação de hold no laço de realimentação do próprio divisor de clock — um cenário comum e tipicamente inofensivo nesse tipo de circuito, já que o resto do sistema (onde o vídeo é de fato processado) roda inteiramente em `clk25`, domínio que está limpo em setup e hold. *Confirmação pendente:* abrir o caminho relatado em `Compilation Report → TimeQuest Timing Analyzer → Slow Model → Hold` e verificar se a origem/destino é de fato `clock_divider:u_clkdiv|clk_out` — se for, a violação pode ser documentada como conhecida e sem impacto funcional; caso contrário, é necessário investigar o registrador reportado.
+ 
+### 8.3 Gargalos e limitações conhecidas
+ 
+- **Paleta de cor fixa (RGB332)** em vez de RAM de paleta programável (seção 4.5/6.6) — decisão de simplificação orientada em aula, reduz a fidelidade de cor e a flexibilidade de reprogramação em tempo de execução.
+- **Prioridade de sprite implícita pelo índice**, não um campo de dado programável (seção 6.4) — limita a reordenação dinâmica de prioridade entre sprites sem realocar o sprite na RAM de atributos.
+- **Violação de hold isolada ao domínio `CLOCK_50`** (ver 8.2) — não afeta o domínio `clk25`, onde todo o processamento de vídeo ocorre, mas deve ser documentada como item conhecido.
+- **Endereçamento de tile via multiplicação** (`tile_row × 40`) consome recursos DSP que poderiam ser evitados com um tilemap de dimensão potência de 2 (ex.: 32×32), à custa de desperdiçar posições de mapa — trade-off aceito em favor de manter os 40×30 exigidos pelo enunciado.
+- **Interface de controle via `SW`/`KEY`** é, por natureza, um estímulo de bancada, não uma interface de comandos de 32 bits validada — a transição para MMIO (Fase 2) exigirá um decodificador de comandos ainda não implementado nesta entrega.
