@@ -1,242 +1,357 @@
-# PBL-SD
-Coprocessador gráfico em FPGA - TEC499
-
 # Coprocessador Gráfico VGA Multicamadas em FPGA
+TEC499 - MI SISTEMAS DIGITAIS
 
-Este repositório contém a documentação e o código-fonte de um coprocessador gráfico desenvolvido em hardware para a placa FPGA DE1-SoC (Intel Cyclone V).
+*Componentes do grupo:*
+* Davi Freitas Queiroz (https://github.com/daviqueirozzcomp)
+* Pedro Haywanon Santos Araujo (https://github.com/phaywanon)
+* Pedro Kruschewsky Lordelo (https://github.com/pkruschewsky)
+
+*Tutor:* Angelo Amâncio Duarte
+
+*Universidade Estadual de Feira de Santana (UEFS)*
 
 ---
 
-## 1. Manual do Sistema
+## 1. Introdução
 
-Este manual destina-se a engenheiros de computação e desenvolvedores, fornecendo a documentação técnica necessária para compreender e utilizar o sistema.
+Os coprocessadores gráficos constituem blocos fundamentais de sistemas computacionais interativos, sendo os responsáveis por assumir a carga exaustiva da renderização visual e liberar a Unidade Central de Processamento (CPU) para a execução da lógica principal da aplicação.
 
-### 1.1 Declaração do Problema e Requisitos
+Este projeto teve como objetivo o desenvolvimento de um núcleo gráfico dedicado em hardware (FPGA), inspirado na arquitetura clássica de consoles de 16 bits. A solução foi projetada para sintetizar um sinal de vídeo VGA (640×480 a 60 Hz) através da orquestração de múltiplas camadas visuais simultâneas: um plano de fundo baseado em blocos (*tilemap*), entidades móveis independentes (*sprites*) e um rasterizador procedural de polígonos.
 
-O problema central deste projeto consistiu no desenvolvimento de um coprocessador gráfico em hardware capaz de gerenciar e renderizar múltiplas camadas gráficas de forma simultânea. O objetivo do hardware é atuar como um acelerador dedicado, libertando o processador principal (CPU) do cálculo exaustivo de varredura de pixels. 
+A implementação foi realizada inteiramente em linguagem Verilog, utilizando a plataforma DE1-SoC (Intel Cyclone V). Um aspecto central do projeto foi a adoção de uma arquitetura de renderização *on-the-fly* — descartando a utilização de um *framebuffer* estático completo para otimização de recursos. Essa decisão exigiu o gerenciamento preciso de latências, o uso de memórias de forma síncrona/assíncrona e a orquestração de um *datapath* dedicado.
 
-Para que a solução resolva o problema, o sistema foi projetado para atender aos seguintes requisitos, abrangendo as especificações explícitas do problema e as necessidades implícitas da arquitetura digital:
+O sistema final foi feito com o propósito de preparar o núcleo de hardware para, em etapas posteriores, atuar de forma autônoma sob o comando de um driver em Assembly ARM e uma aplicação em linguagem C.
 
-*   **Geração de Sinal de Vídeo (Explícito):** Sintetizar um sinal analógico VGA com resolução física de 640x480 pixels a uma taxa de atualização de 60 Hz, fornecendo os pulsos de sincronismo vertical e horizontal ao monitor.
-*   **Múltiplas Camadas de Renderização (Explícito):** Instanciar e orquestrar três motores gráficos independentes: um cenário de fundo (*Background*), um gerador de formas geométricas (Rasterizador de Polígonos) e um controlador de entidades móveis (*Sprites*).
-*   **Controle e Datapath Multiplexado (Explícito):** Integrar os periféricos da placa (chaves `SW` e botões `KEY`) através de uma Máquina de Estados Finitos (MEF), roteando os comandos do usuário para o motor gráfico correspondente sem sobreposição indesejada de ações.
-*   **Sincronização e Resolução de Conflitos Visuais (Implícito):** Implementar um Compositor capaz de arbitrar qual camada gráfica deve ser exibida quando há sobreposição espacial (Prioridade: Sprite > Polígono > Background). Adicionalmente, compensar a latência de leitura das memórias *Dual-Port* através de um *pipeline* de atraso temporal para alinhar a saída dos pixels.
-*   **Gerenciamento Eficiente de Memória (Implícito):** Otimizar o uso de blocos BRAM internos da FPGA. Para o cenário, adotar a arquitetura de *Tilemaps* vinculada a uma ROM compartilhada de texturas em vez de *framebuffers* completos. Para os sprites, implementar uma RAM de atributos dinâmica.
+---
 
-### 1.2 Arquitetura da Solução Proposta
+## 2. Especificação de Hardware
 
-![Visão de Alto Nível do Coprocessador](diagrama.png)
+| Item | Valor |
+|---|---|
+| Placa de desenvolvimento | Terasic DE1-SoC |
+| FPGA | Intel/Altera Cyclone V — `5CSEMA5F31C6` |
+| Ferramenta de síntese | Quartus Prime 23.1std.0 Build 991 (SC Lite Edition) |
+| Clock de entrada | 50 MHz (`CLOCK_50`), dividido internamente para 25 MHz via `clock_divider.v` |
+| Periféricos usados na demonstração | `SW[9:0]`, `KEY[3:0]`, saída VGA (`VGA_R/G/B`, `VGA_HS/VS`, `VGA_CLK`, `VGA_SYNC_N`, `VGA_BLANK_N`) |
 
-A solução resolve o problema da renderização simultânea adotando uma arquitetura paralela de processamento de vídeo, orquestrada dentro do módulo principal `top_video.v` (instanciado no topo da placa `DE1_SOC_golden_top`). O sistema é dividido conceitualmente em três grandes eixos: Controle (Datapath), Geração de Coordenadas e Motores de Renderização.
+---
 
-**Fluxo de Controle e Dados:**
-1. **Entradas e Roteamento (MEF):** Os controles físicos do usuário (`KEY[3:0]` e `SW[9:0]`) alimentam a Máquina de Estados Finitos (`mef_demonstracao`). A MEF atua como um multiplexador inteligente: ela lê os bits seletores de estado (`SW[9:8]`) e direciona os sinais dos botões (que funcionam como "direcionais" e "confirmar") e das chaves de dados apenas para o motor gráfico correspondente (Background, Polígonos ou Sprites). Isso resolve o problema de sobreposição de comandos, permitindo que a mesma interface física controle múltiplas camadas de forma independente.
-2. **Base de Tempo e Coordenadas:** O módulo `clock_divider` reduz o relógio da placa de 50 MHz para 25 MHz, alimentando o `vga_driver`. O driver varre a tela e fornece as coordenadas físicas atuais (`next_x` e `next_y`) de 640x480 pixels. Para otimizar o processamento e a memória, essas coordenadas sofrem um deslocamento de bits lógico (`>> 1`), transformando a área de processamento interno dos motores gráficos em uma resolução lógica de 320x240 pixels (onde cada pixel computado é duplicado visualmente num bloco 2x2 na tela).
-3. **Renderização Paralela:** As coordenadas lógicas alimentam simultaneamente os três motores de vídeo (`motor_background`, `motor_sprites` e `rasterizador_poligonos`). Cada bloco calcula de forma isolada qual deve ser a cor daquele pixel exato na sua respectiva camada.
-4. **Sincronização (Pipeline):** Como o motor de cenário exige consultas encadeadas em memória (ler o Tilemap na RAM e depois a textura na ROM), ele possui um atraso inerente de 2 ciclos de *clock*. Para evitar que os sprites e polígonos fiquem "desalinhados" na tela em relação ao fundo, seus sinais passam por registradores de atraso (*Pipeline de Alinhamento*).
-5. **Composição e Saída:** Os três sinais, agora perfeitamente sincronizados, entram no `compositor`. Ele aplica a regra matemática de sobreposição (Sprite > Polígono > Fundo), tratando o índice de cor `0` como transparente. O pixel vencedor é convertido diretamente para um empacotamento RGB de 8 bits (RRRGGGBB) e enviado aos pinos VGA analógicos da placa.
+## 3. Fundamentação teórica
 
+Para atender aos requisitos da construção do núcleo gráfico, foi necessário entender e pesquisar sobre a arquitetura dos computadores e seus componentes no universo hardware.
 
-### 1.3 Detalhamento dos Blocos Funcionais e Código-Fonte
+### 3.1. Coprocessadores
 
-Esta seção descreve a mecânica interna de cada módulo, detalhando o fluxo de dados (entradas e saídas) e o processamento lógico.
+Os coprocessadores têm como função retirar a sobrecarga da CPU ao realizar uma funcionalidade específica que seria da CPU — uma ideia de delegação e subdivisão de funções, mas com um objetivo específico.
 
-#### 1.3.1 Gerador de Temporização de Vídeo (`vga_driver.v`)
+Um coprocessador gráfico é uma unidade lógica dedicada a assumir a pesada carga de trabalho da renderização visual. Em arquiteturas futuras, em vez da CPU principal calcular e enviar cada pixel individualmente para o monitor, ela enviará apenas comandos de alto nível (ex.: "mova o personagem para X e Y"). O hardware do coprocessador traduz essas instruções em sinais elétricos (VGA) de forma autônoma e paralela.
 
-O `vga_driver` atua como o coração temporal do sistema. Seu papel é garantir que o monitor receba os dados no momento exato em que o feixe de varredura está desenhando a tela.
+### 3.2. Memórias
 
-*   **Entradas:** Recebe o `clock` reduzido de 25 MHz (padrão para 640x480 a 60 Hz), o sinal de `reset`, e a cor final processada `color_in` no formato de 8 bits (RRRGGGBB).
-*   **Processamento:** Utiliza uma máquina de estados e contadores horizontais (`h_counter`) e verticais (`v_counter`) para simular o comportamento de um monitor CRT. Ele percorre as zonas ativas (onde há imagem) e as zonas mortas (*Front Porch*, *Sync Pulse* e *Back Porch*) para gerar os pulsos de sincronismo `hsync` e `vsync`.
-*   **Saídas:** Exporta os sinais analógicos `red`, `green`, `blue` e os sincronismos para os pinos da placa. Fundamentalmente, exporta as coordenadas `next_x` e `next_y`, avisando aos demais blocos qual pixel será renderizado no próximo ciclo de *clock*.
+De acordo com os princípios descritos por Patterson e Hennessy em *Computer Organization and Design*, o projeto eficiente de um *datapath* depende fortemente da organização da memória para evitar gargalos de latência e conflitos de acesso. A arquitetura utiliza a memória interna da FPGA (blocos M10K, operando com a velocidade e o determinismo de memórias SRAM) dividida em duas funções estritas:
 
-**Trecho de Código Principal (Geração de Coordenadas):**
-```verilog
-// ... (Declaração de estados e parâmetros do VGA) ...
+* **RAM Dual-Port:** Empregada sob o mesmo princípio de um banco de registradores (*register file*) de um processador *pipelined*, esta memória dinâmica armazena os índices do mapa e possui portas de acesso independentes. A porta de leitura opera continuamente para alimentar o fluxo de vídeo (varredura), enquanto a porta de escrita recebe comandos de alteração do usuário. Essa estrutura *dual-port* resolve o que a literatura chama de *structural hazard* (conflito estrutural), garantindo que a edição do cenário ocorra em tempo real sem causar travamentos ou corrupção no sinal contínuo enviado ao monitor.
+* **ROM One-Port:** Conceitualmente descrita na arquitetura de computadores como uma tabela-verdade (*look-up table*) gigante e imutável, a ROM armazena a estética dos blocos (texturas). Ela não guarda estado dinâmico; seu papel é atuar como um decodificador fixo definido em tempo de síntese.
+* **O fluxo de dados (encadeamento):** O fluxo assemelha-se ao ciclo de busca de instruções de uma CPU. Durante a varredura de tela, a RAM recebe a coordenada atual e fornece um índice numérico. Esse índice atua imediatamente como endereço de acesso na ROM, que por sua vez entrega o dado final (o arranjo de pixels daquele bloco) para o estágio de composição do *pipeline* visual.
 
-// A máquina de estados incrementa o h_counter. Ao fim da linha, zera o h_counter e incrementa o v_counter.
-// As coordenadas físicas (next_x, next_y) só recebem os valores dos contadores durante a área ativa da tela.
-// Nas áreas de "blanking" (sincronismo), as coordenadas são forçadas para 0.
-assign next_x = (h_state == H_ACTIVE_STATE) ? h_counter : 10'd_0 ;
-assign next_y = (v_state == V_ACTIVE_STATE) ? v_counter : 10'd_0 ;
+### 3.3. Renderização On-the-Fly vs. Framebuffer
 
-// A cor de entrada é mapeada diretamente para os canais RGB ignorando paletas complexas (conversão direta RRRGGGBB)
-always@(posedge clock) begin
-    // ...
-    red_reg   <= (h_state==H_ACTIVE_STATE) ? ((v_state==V_ACTIVE_STATE) ? {color_in[7:5],5'd_0} : 8'd_0) : 8'd_0 ;
-    green_reg <= (h_state==H_ACTIVE_STATE) ? ((v_state==V_ACTIVE_STATE) ? {color_in[4:2],5'd_0} : 8'd_0) : 8'd_0 ;
-    blue_reg  <= (h_state==H_ACTIVE_STATE) ? ((v_state==V_ACTIVE_STATE) ? {color_in[1:0],6'd_0} : 8'd_0) : 8'd_0 ;
-end
-```
+A abordagem tradicional de vídeo em computadores modernos utiliza um *framebuffer* — uma memória RAM massiva que armazena a cor de todos os pixels da tela simultaneamente. Contudo, a adoção de um *framebuffer* interno em uma FPGA esbarra em restrições severas de arquitetura de hardware:
 
-#### 1.3.2 Motor de Cenário e Memórias (`motor_background.v`)
+* **Gargalo de largura de banda (*memory bandwidth*):** Para atualizar e ler um *framebuffer* completo a 640×480 pixels a 60 Hz, o sistema exigiria fluxos massivos de escrita e leitura simultâneas, criando dependências de dados severas e riscos de travamento no barramento (*data hazards*).
+* **Granularidade dos blocos M10K:** A FPGA Cyclone V não possui um bloco único e contínuo de RAM como um computador pessoal, mas sim dezenas de pequenos blocos isolados chamados M10K. Unir esses blocos para formar um *framebuffer* contínuo exigiria uma malha complexa de multiplexação de endereços.
+* **A solução (*on-the-fly*):** Optou-se pela renderização instantânea acoplada à varredura (*beam racing*). O sistema não armazena a tela inteira. A arquitetura de *datapath* calcula a cor de cada pixel de forma combinacional e síncrona, com acesso determinístico de ciclo fixo, alinhando-se à frequência de 25 MHz do controlador VGA e eliminando qualquer risco de *stall* no fluxo de vídeo.
 
-Este módulo renderiza uma malha contínua de cenários formada por blocos de texturas (*tiles*) de 8x8 pixels.
+---
 
-*   **Entradas:** Recebe as coordenadas `next_x` e `next_y` e os deslocamentos de câmera `scroll_x` e `scroll_y`. Além disso, possui uma interface de escrita (`tm_wr_en`, `tm_wr_addr`, `tm_wr_data`) para modificar a fase do jogo em tempo real.
-*   **Processamento:** O motor converte a resolução física 640x480 para lógica (deslocando 1 bit das coordenadas para a direita) e soma o valor de *scroll*. O sistema recicla as coordenadas (*wrap-around*) usando lógica de módulo (ex: `scrolled_x_full >= 320`) para dar a ilusão de um mundo infinito. O endereço do tile (linha e coluna) é enviado à RAM Dual-Port (`ram_tilemap.v`), que devolve o ID do bloco. Esse ID, somado à posição do pixel interno do bloco, consulta a ROM (`rom_cenario_tile.v`).
-*   **Saídas:** A cor específica do pixel daquele tile (`cor_pixel`) e o endereço de memória para consulta da textura compartilhada (`rom_addr`).
+## 4. Arquitetura e Datapath
 
-**Trecho de Código Principal (Matemática Espacial e Paginação):**
-```verilog
-// 1. Resolução Lógica: Descarta o bit menos significativo para transformar 640x480 em 320x240
-wire [8:0] logical_x = next_x[9:1];
-wire [7:0] logical_y = next_y[9:1];
+A arquitetura do coprocessador foi estruturada em torno de um núcleo centralizador (`top_video.v`), que interliga subsistemas independentes de temporização, controle de estado e motores gráficos através de um *datapath* síncrono.
 
-// 2. Scroll: Soma a posição estática da tela com o deslocamento da câmera
-wire [9:0] scrolled_x_full = logical_x + scroll_x;
-wire [8:0] scrolled_y_full = logical_y + scroll_y;
+### 4.1. Gerenciamento de Clock e Base de Tempo
 
-// 3. Wrap-around (Bordas Infinitas): Se passar de 320 ou 240, reinicia do zero subtraindo o limite
-wire [8:0] scrolled_x = (scrolled_x_full >= 10'd320) ? (scrolled_x_full - 10'd320) : scrolled_x_full[8:0];
-wire [7:0] scrolled_y = (scrolled_y_full >= 9'd240) ? (scrolled_y_full - 9'd240) : scrolled_y_full[7:0];
+O sistema opera a partir de um sinal de clock de 50 MHz (`CLOCK_50`) fornecido pela placa DE1-SoC. Através do módulo `clock_divider`, emprega-se um flip-flop do tipo T (*toggle*) para realizar a divisão exata por 2, gerando um sinal de 25 MHz (`clk25`).
 
-// 4. Divisão do Tile: Como cada tile tem 8x8 pixels (2^3), os 3 bits menos significativos 
-//    são o "pixel" dentro do tile, e o restante forma a coluna/linha do mapa.
-wire [5:0] tile_col = scrolled_x[8:3];
-wire [4:0] tile_row = scrolled_y[7:3];
-wire [2:0] pixel_x  = scrolled_x[2:0];
-wire [2:0] pixel_y  = scrolled_y[2:0];
+* Esta frequência é o parâmetro crítico que alimenta o controlador de vídeo (`vga_driver`), responsável por simular o comportamento de varredura de um monitor de 640×480 pixels a aproximadamente 60 Hz.
+* O driver mapeia contadores horizontais (`h_counter`) e verticais (`v_counter`) para gerar os pulsos de sincronismo (`VGA_HS` e `VGA_VS`) e fornecer continuamente as coordenadas físicas ativas (`next_x` e `next_y`). A temporização segue o padrão VGA 640×480@60Hz: 800 ciclos de pixel por linha (640 ativos + 16 *front porch* + 96 pulso + 48 *back porch*) e 525 linhas por quadro (480 ativas + 10 + 2 + 33), resultando em ≈25,175 MHz teóricos — os 25 MHz obtidos por divisão simples ficam dentro da tolerância aceita pela maioria dos monitores.
+* Para atender à exigência de uma resolução lógica da cena de 320×240 pixels com duplicação de pixels na saída (ampliação visual por um fator 2×2), essas coordenadas sofrem um deslocamento lógico de bits à direita (`>> 1`, i.e. `next_x[9:1]`/`next_y[9:1]`). Essa técnica dimensiona a área de atuação dos motores gráficos de forma eficiente antes de atingirem o estágio final de saída.
+* **Divisor simples em vez de PLL:** o `clk25` é gerado por um flip-flop de *toggle* comum, não por um dos 6 PLLs disponíveis na Cyclone V (0/6 usados, ver seção 6.1). Essa escolha foi deliberada para manter a Fase 1 simples, aceitando o desvio de ~0,7% em relação aos 25,175 MHz "ideais" do padrão VGA — desvio tolerado pela grande maioria dos monitores. O custo dessa simplificação aparece na análise de timing (seção 6.2): por não usar uma rede de clock dedicada como a de um PLL, o `clk25` fica sujeito a uma violação de *hold* isolada no próprio registrador do divisor. Um PLL fica reservado como melhoria futura, caso se precise de um clock de pixel mais preciso ou de uma rede de distribuição de clock com menor *skew*.
 
-// O endereço do mapa (matriz 1D) é calculado por: (linha * largura) + coluna
-wire [10:0] tilemap_addr = (tile_row * 11'd40) + tile_col;
-```
-#### 1.3.3 Rasterizador de Polígonos (`rasterizador_poligonos.v`)
+### 4.2. Datapath Multiplexado e Roteamento de Comandos (`mef_demonstracao.v`)
 
-Este módulo é o hardware responsável por desenhar formas geométricas preenchidas (retângulos e triângulos) diretamente na tela, testando se o pixel atual pertence à área da forma.
+Como a placa possui uma quantidade limitada de botões físicos (`KEY`) e chaves de dados (`SW`), a arquitetura implementa uma **interface de comando** (`mef_demonstracao`). Este módulo atua como um demultiplexador inteligente de sinais de controle, com as chaves seletoras `SW[9:8]` atuando diretamente como bits de seleção do barramento:
 
-*   **Entradas:** Coordenadas lógicas da tela (`jogo_x`, `jogo_y`), seletor de forma (`modo_ativo`), as coordenadas dos vértices (`x0`, `y0` até `x2`, `y2`) e a cor desejada (`cor_indice`).
-*   **Processamento:** Para o retângulo, o hardware utiliza comparadores lógicos simples (verificando se X e Y estão entre as bordas). Para o triângulo, utiliza-se a Função de Aresta (*Edge Function*). Para corrigir erros de *underflow* (estouro de bit) durante a subtração geométrica, as coordenadas de entrada de 9/8 bits sem sinal são convertidas para 11 bits com sinal (`signed`) preenchendo com zeros à esquerda. Isso garante diferenças seguras de 12 bits e cálculos de área precisos de 24 bits.
-*   **Saídas:** Um sinal de ativação (`poly_ativo`) e a cor correspondente (`poly_color`), indicando ao compositor que aquele pixel pertence ao polígono.
+| `SW[9:8]` | Modo | Sinais liberados para o *datapath* |
+|:---:|---|---|
+| `00` | Ocioso (IDLE) | Todas as saídas de controle em repouso (`0`) |
+| `01` | Background | `bg_d` (dados de tile/cor), `bg_wr_addr` (cursor de edição), *scroll* via `KEY[2]`/`KEY[3]` |
+| `10` | Polígonos | Coordenadas do retângulo/triângulo ativo, cor via `SW[5:0]` + `KEY[1]` |
+| `11` | Sprites | `spr_d[3:0]` (direção contínua), `spr_d[6:4]` (seleção de personagem) |
 
-**Trecho de Código Principal (Correção Numérica do Triângulo):**
-```verilog
-    // 1. Extensão para 11 bits COM SINAL (evita underflow nas subtrações de coordenadas negativas)
-    wire signed [10:0] x0s = {2'b00, x0};
-    wire signed [10:0] x1s = {2'b00, x1};
-    wire signed [10:0] y0s = {2'b00, y0};
-    wire signed [10:0] y1s = {2'b00, y1};
-    wire signed [10:0] jxs = {2'b00, jogo_x};
-    wire signed [10:0] jys = {3'b000, jogo_y};
+Por ser puramente combinacional, este bloco garante latência zero no repasse dos comandos do usuário e resolve o *structural hazard* das entradas físicas, impedindo que um único botão mova o cenário e o personagem simultaneamente. Vale registrar que, por não possuir elemento de memória (não há registrador de estado interno — o "estado atual" é uma função direta de `SW[9:8]`), este bloco funciona como um decodificador de modo combinacional, e não como uma FSM registrada no sentido clássico; essa escolha foi deliberada para dar resposta instantânea e determinística ao alternar contextos usando chaves físicas (não pulsadas) da DE1-SoC, servindo de ponte direta para a futura FSM sequencial que decodificará a ISA de 32 bits vinda do driver.
 
-    // 2. Diferenças dimensionadas para 12 bits com sinal
-    wire signed [11:0] dx01 = x1s - x0s;
-    wire signed [11:0] dy01 = y1s - y0s;
-    wire signed [11:0] pjx0 = jxs - x0s;
-    wire signed [11:0] pjy0 = jys - y0s;
+### 4.3. Topologia de Interconexão e Memórias Independentes (`top_video.v`)
 
-    // 3. Função de Aresta (Produto vetorial) dimensionado para 24 bits com sinal
-    wire signed [23:0] e01 = (dx01 * pjy0) - (dy01 * pjx0);
-    
-    // O pixel está dentro se apresentar o mesmo sinal para as 3 arestas
-    wire dentro_triangulo = (e01 >= 0 && e12 >= 0 && e20 >= 0) ||
-                            (e01 <= 0 && e12 <= 0 && e20 <= 0);
-```
-#### 1.3.4 Motor e Controlador de Sprites (`motor_sprites.v` e `controlador_sprite.v`)
+No módulo de topo (`top_video.v`), as instâncias de hardware isolam completamente o acesso aos recursos gráficos para assegurar determinismo de ciclo:
 
-O subsistema de sprites gerencia entidades dinâmicas de 16x16 pixels que podem se mover livremente sobre o cenário.
+* **Módulos de interface de ROM:** Os blocos `motor_tile` e `rom_sprites_inst` encapsulam as instâncias de *megafunctions* geradas via IP Catalog (configuradas no modo ROM 1-PORT), utilizando blocos físicos M10K dedicados da FPGA Cyclone V.
+* **Isolamento de barramentos:** Os sinais de endereço e dados do background (`bg_rom_addr`, `bg_rom_data`) e dos sprites (`spr_rom_addr`, `spr_rom_data`) trafegam por vias físicas totalmente independentes até convergirem exclusivamente no estágio final do compositor. Isso elimina qualquer gargalo de contenção de barramento entre as camadas visuais.
 
-*   **Entradas:** Coordenadas lógicas do pixel e os comandos roteados pela Máquina de Estados (direcionais, chave de alvo `id_alvo`, chave de virar `modo_flip` e chave de troca de textura `sw_change_char`).
-*   **Processamento:** 
-    *   O `controlador_sprite` gerencia arrays de estado independentes (posição X/Y, índice da textura e flip H/V) para múltiplos alvos, empacotando essas propriedades em palavras de 32 bits e gravando na memória de atributos do motor.
-    *   O `motor_sprites` armazena 32 atributos. A cada pixel varrido, ele testa colisões contra todos os 32 sprites simultaneamente. O laço de repetição verifica a prioridade de forma reversa (de 31 até 0), garantindo que o Sprite 0 (o "Player") sempre sobreponha os demais em caso de sobreposição.
-*   **Saídas:** O sinal visual final da entidade (`sprite_color`) e seu estado de ativação (`sprite_ativo`) devidamente alinhados com a leitura da ROM dedicada de sprites.
+### 4.4. O Datapath das Memórias: a Mecânica entre RAM e ROM
 
-**Trecho de Código Principal (Decodificador de Prioridade):**
-```verilog
-    // Máscara de acerto: testa se o pixel lógico atual está dentro da área 16x16 de algum sprite
-    assign hit_mask[i] = spr_enable && (diff_x < 9'd16) && (diff_y < 8'd16);
+O motor de fundo (*background*) reside na interação síncrona entre duas estruturas de memória distintas alocadas nos blocos M10K da FPGA:
 
-    reg [4:0] winner_idx;
-    reg       winner_hit;
-    integer j;
-    
-    // Resolução de Prioridade: varre do maior para o menor ID.
-    // Como os IDs menores são testados por último, eles sobrescrevem o winner_idx,
-    // garantindo que o Sprite 0 sempre vença se houver intersecção espacial.
-    always @(*) begin
-        winner_hit = 1'b0;
-        winner_idx = 5'd0;
-        for (j = 31; j >= 0; j = j - 1) begin
-            if (hit_mask[j]) begin
-                winner_hit = 1'b1;
-                winner_idx = j[4:0];
-            end
-        end
-    end
-```
+* **RAM Dual-Port (Tilemap):** Armazena o mapa lógico do cenário — um *tilemap* de 40×30 posições. O endereço linear é calculado por `tilemap_addr = tile_row × 40 + tile_col`, cobrindo as 1.200 posições do mapa em um barramento de **11 bits**. A porta de leitura é vinculada ao feixe de varredura do monitor e opera com **1 ciclo de latência** (saída registrada do `altsyncram`); a porta de escrita permite alterar o tile associado a cada posição em tempo real, sem congelar ou corromper a imagem exibida.
+* **ROM (armazenamento de tiles):** O dado de saída da RAM (`tile_id`, 8 bits) é concatenado com a posição interna do pixel dentro do bloco para formar o endereço de leitura da ROM: `rom_addr = {tile_id, pixel_y[2:0], pixel_x[2:0]}`, um barramento de **14 bits** que endereça 16.384 posições — ou seja, até **256 padrões gráficos distintos de 8×8 pixels** (64 pixels cada). Assim como a RAM, a ROM é configurada com saída registrada (`outdata_reg_a = "CLOCK0"`), adicionando mais **1 ciclo de latência**.
+* **Comunicação:** O elo entre as duas memórias é puramente estrutural no *datapath* — o índice de tile fornecido pela RAM é injetado diretamente como endereço de entrada da ROM, que devolve o dado de cor bruto para o compositor. A latência total do caminho **coordenada → RAM → ROM** é, portanto, de **2 ciclos de `clk25`** — valor que a seção 4.5 usa como referência para dimensionar o *pipeline* de compensação.
 
-#### 1.3.5 Máquina de Estados e Compositor (`mef_demonstracao.v` e `compositor.v`)
+### 4.5. Pipeline de Sincronização e o Compositor
 
-O controle e a unificação das imagens ocorrem na última etapa do processamento lógico. A MEF gerencia os botões do usuário, enquanto o Compositor unifica as camadas visuais.
+Como os blocos M10K exigem ciclos de clock físicos para efetuar o acesso síncrono, a cadeia de leitura do cenário (coordenada → RAM → ROM) introduz uma latência inerente de **2 ciclos**, enquanto os motores de polígonos e sprites realizam cálculos predominantemente combinacionais e imediatos. Sem compensação, isso geraria desalinhamento visual (bordas tracejadas ou "fantasmas") entre as camadas. A arquitetura resolve isso com uma contabilidade de ciclos específica para cada camada:
 
-*   **Entradas (MEF):** Chaves da placa (`SW[9:8]` como seletores de modo, `SW[7:0]` como dados) e os botões (`KEY[3:0]`).
-*   **Processamento (MEF):** Atua como um roteador de contexto (*Datapath*). Se `SW[9:8]` for `01`, os comandos dos botões são enviados ao Background. Se for `10`, aos Polígonos. Se for `11`, aos Sprites. Isso garante que o usuário não mova o cenário e o personagem ao mesmo tempo com o mesmo botão.
-*   **Processamento (Compositor):** Recebe a cor e o sinal de ativação dos três motores. Como a RAM do cenário leva 2 ciclos de *clock* para devolver a cor, o compositor atrasa os sinais dos Sprites e Polígonos (usando flip-flops em cascata, formando um *Pipeline*) para que todas as camadas cheguem no mesmo instante. A resolução de prioridade obedece à regra: se o Sprite está ativo e sua cor não é `0` (transparente), ele vence. Caso contrário, testa-se o Polígono e, por fim, o Fundo.
-*   **Saídas:** A cor final de 8 bits do pixel que efetivamente será enviada ao monitor VGA.
+* **Polígonos** não possuem nenhuma memória no seu caminho de dados — o resultado da função de aresta é combinacional e imediato (0 ciclos intrínsecos). Para alcançar a latência de 2 ciclos do fundo, o sinal passa por **dois registradores em série** (`poly_ativo_1 → poly_ativo_2`, `poly_color_1 → poly_color_2`).
+* **Sprites** já herdam **1 ciclo intrínseco** da leitura registrada da ROM de sprites (mesma configuração `outdata_reg_a = "CLOCK0"`). Por isso, precisam de apenas **1 registrador adicional** (`spr_ativo_atrasado`, `spr_color_atrasado`) para fechar os mesmos 2 ciclos do fundo.
 
-**Trecho de Código Principal (Regra de Prioridade no Compositor):**
-```verilog
-    // O Índice 0 na paleta das ROMs é tratado como "Transparente".
-    // A lógica testa em cascata respeitando a sobreposição: Sprite > Polígono > Background
-    always @(*) begin
-        cor_final = 8'd0; 
-        
-        if (sprite_ativo_pipe && sprite_color_pipe != 8'd0) begin
-            cor_final = sprite_color_pipe;
-        end 
-        else if (poly_ativo_pipe && poly_color_pipe != 8'd0) begin
-            cor_final = poly_color_pipe;
-        end 
-        else if (bg_ativo_pipe && bg_color_pipe != 8'd0) begin
-            cor_final = bg_color_pipe;
-        end
-    end
-```
+Os três sinais — agora sincronizados no mesmo instante de tempo lógico — ingressam no compositor, que arbitra a prioridade visual de cada camada em tempo real. O sistema aplica a regra de transparência antes da seleção do pixel final, na qual o índice de cor `0` atua de modo reservado como transparente para sprites e polígonos. O pixel vencedor é traduzido diretamente para o formato de saída (mapeamento fixo RGB332 — 3 bits de vermelho, 3 de verde, 2 de azul, decisão adotada em aula para evitar a latência adicional de uma RAM de paleta programável) e enviado aos pinos analógicos do DAC VGA.
 
-### 1.4 Testes
+### 4.6. Escalabilidade e Preparação para o Coprocessamento (Fase 2)
 
-Para garantir que a arquitetura atenda a todos os requisitos do problema, estruturou-se um plano de validação em hardware. Os testes foram planejados para isolar cada módulo inicialmente, validando sua matemática e temporização, e culminar no teste de integração multicamadas.
+O núcleo gráfico atual foi projetado visando a transição direta para uma arquitetura completa de coprocessamento. Analisando os requisitos futuros do sistema, a base atual já atende às demandas mais críticas de hardware:
 
-*   **Teste 1 - Validação da Base de Tempo e Cenário:**
-    *   **Objetivo:** Comprovar a geração correta do sincronismo VGA a 60 Hz e a leitura estável das memórias *Dual-Port* e ROM.
-    *   **Ação:** Ativar o modo Fundo (`SW[9:8] = 01`) e utilizar os botões direcionais.
-    *   **Resultado Esperado:** A imagem do *Tilemap* deve ser exibida sem distorções horizontais ou verticais. O deslocamento da câmera (*scroll*) deve empurrar a tela revelando novos tiles, aplicando o *wrap-around* (retorno da borda) sem falhas de paginação.
+* **Unidade de desenho e VGA contínuo:** os motores de renderização (background, sprites e polígonos) e o controlador VGA já operam de forma autônoma, independentemente do modo selecionado em `SW[9:8]`.
+* **Memórias internas:** o armazenamento de atributos e texturas já está devidamente roteado e encapsulado nos blocos M10K.
+* **Escalonamento:** como o *datapath* visual já está estabilizado e isolado através do `mef_demonstracao`, a substituição das chaves físicas da placa (SW e KEY) por uma futura Unidade de Controle (UC) e uma Unidade Lógica e Aritmética (ULA) ocorrerá de forma modular. O sistema está pronto para receber um Registrador de Instruções (IR) de 32 bits, bastando conectar as saídas da futura UC diretamente nas entradas de dados que hoje são alimentadas pela placa.
 
-*   **Teste 2 - Validação Matemática dos Polígonos:**
-    *   **Objetivo:** Confirmar a eficácia da *Edge Function* com expansão de bits sinalizados, garantindo que não ocorra *underflow*.
-    *   **Ação:** Ativar o modo Polígono (`SW[9:8] = 10`) e testar a geração do Retângulo e, em seguida, do Triângulo.
-    *   **Resultado Esperado:** As formas devem ser preenchidas de forma sólida. O Triângulo não deve apresentar pixels vazados, cintilações ou áreas corrompidas, comprovando que as diferenças dimensionadas para 12/24 bits com sinal seguraram as coordenadas negativas.
+---
 
-*   **Teste 3 - Estresse e Prioridade de Sprites:**
-    *   **Objetivo:** Validar o controle individual das 32 entidades em tela, espelhamento dinâmico e o roteamento de borda na troca de personagem.
-    *   **Ação:** Ativar o modo Sprite (`SW[9:8] = 11`), selecionar diferentes índices (`SW[5:4]`), acionar o espelhamento (`SW[7]`) e o detector de borda para ciclo de personagem (`SW[6]`). Colidir o Sprite 0 contra o Sprite 1.
-    *   **Resultado Esperado:** Cada personagem deve responder independentemente. A chave `SW[6]` deve avançar o personagem uma única vez por acionamento. Na colisão, o Sprite 0 deve obrigatoriamente se sobrepor ao Sprite 1, provando a eficácia do decodificador de prioridade reversa.
+## 5. Detalhamento dos Motores Gráficos
 
-*   **Teste 4 - Integração e Pipeline de Atraso:**
-    *   **Objetivo:** Validar o Compositor e o alinhamento temporal das camadas.
-    *   **Ação:** Posicionar um Sprite sobre um Triângulo, e ambos sobre o Cenário.
-    *   **Resultado Esperado:** A cor preta (índice 0) dos limites do Sprite deve ser transparente, revelando o Triângulo embaixo. Não devem ocorrer "fantasmas" ou bordas desalinhadas, provando que o *pipeline* de 2 ciclos atrasou corretamente os dados imediatos para casar com a leitura atrasada da memória do cenário.
+O núcleo gráfico é composto por três motores independentes, que formam a Unidade de Desenho, operando em paralelo de forma que as saídas são unificadas pelo compositor.
 
- ## 2. Manual do Usuário
+### 5.1. Motor de Background e Gerenciamento de Rolagem (*Scroll*)
 
-Este manual orienta a operação do coprocessador gráfico na placa DE1-SoC e apresenta a discussão dos resultados obtidos durante a validação em hardware, integrando as instruções de uso aos testes do sistema.
+O subsistema de fundo transforma as coordenadas lógicas da tela em uma malha contínua de blocos (*tiles*) de 8×8 pixels, implementado em `motor_background.v` e `motor_tilemap.v`.
 
-### 2.1 Configuração Inicial
-1. Conecte um cabo e um monitor padrão VGA à porta de vídeo da placa DE1-SoC.
-2. Conecte a placa ao computador via cabo USB e ligue a alimentação de energia.
-3. Utilize o software Quartus Prime para carregar o projeto.
-4. O monitor exibirá instantaneamente a composição das três camadas (Cenário, Polígonos e Sprites) na resolução física de 640x480 pixels.
+* **Conversão e resolução lógica:** o sistema descarta o bit menos significativo das coordenadas físicas do VGA (`next_x[9:1]`, `next_y[9:1]`), convertendo a resolução de 640×480 para uma área de processamento lógica de 320×240 pixels.
+* **Matemática de rolagem e *wrap-around*:** as coordenadas lógicas são somadas aos deslocamentos de câmera (`scroll_x`, `scroll_y`). Para simular um mundo contínuo, o hardware aplica verificações condicionais: se a posição somada ultrapassar os limites da tela (320 no eixo X, 240 no eixo Y), o sistema reinicia o ciclo subtraindo o valor limite, garantindo paginação contínua sem estouro de barramento.
+* **Endereçamento linear do tilemap:** a partir da posição com *scroll*, o motor isola os 3 bits menos significativos para identificar a posição interna do pixel dentro do tile (`pixel_x`, `pixel_y`), enquanto os bits restantes formam a linha e a coluna do mapa (ver fórmula e larguras de barramento na seção 4.4).
 
-### 2.2 Mapa de Controles Gerais
-O roteamento dos comandos é feito pelas chaves `SW[9:8]`. Altere essas chaves para escolher qual camada da tela os botões `KEY[3:0]` irão controlar.
+### 5.2. Motor de Sprites e Banco de Atributos Dinâmicos (`motor_sprites.v`)
 
-| Chaves `SW[9:8]` | Modo Ativo | Função dos Botões `KEY[3:0]` |
-| :--- | :--- | :--- |
-| `00` | **Ocioso / Visualização** | Nenhuma ação de deslocamento. A tela permanece estática. |
-| `01` | **Controle do Background** | Movem a câmera (Scroll) pelo mapa do cenário em 4 direções. |
-| `10` | **Controle de Polígonos** | Movem a posição espacial do polígono ativo pela tela. |
-| `11` | **Controle de Sprites** | Controlam o movimento e espelhamento do Sprite selecionado. |
+O subsistema de sprites gerencia entidades gráficas móveis e independentes de 16×16 pixels, suportando até **32 instâncias simultâneas** armazenadas em uma RAM interna de atributos (`sprite_ram`), com um registrador de 32 bits por sprite: 1 bit de habilitação, 2 bits de espelhamento (X/Y), 8 bits de padrão gráfico, 8 bits de posição Y e 9 bits de posição X.
 
-## 3. Conclusão
+* **Varredura e máscara de cobertura (*hit mask*):** a cada ciclo de pixel, um bloco `generate` testa simultaneamente se as coordenadas lógicas atuais estão dentro da área 16×16 de cada sprite habilitado.
+* **Resolução de prioridade reversa:** para resolver colisões espaciais entre múltiplos sprites, um laço combinacional varre a matriz de acertos em ordem decrescente de índice:
 
-O desenvolvimento deste coprocessador gráfico em FPGA demonstrou com sucesso a viabilidade de uma arquitetura de renderização de vídeo totalmente em hardware. A integração dos três motores gráficos independentes — aliada ao roteamento da Máquina de Estados (MEF) e ao *pipeline* de sincronização do Compositor — permitiu a geração de um sinal VGA estável com múltiplas camadas sobrepostas. Por fim, os resultados dos testes práticos atestam que todos os requisitos operacionais, visuais e de controle foram plenamente atingidos, entregando um sistema robusto, responsivo e pronto para futuras expansões.
+  ```
+  for i in 31 downto 0:
+      if hit(sprite[i], x, y) and enabled(sprite[i]):
+          winner = sprite[i]   // sobrescreve; ao final, o menor índice prevalece
+  ```
+
+  Como os índices menores são avaliados por último no laço, eles sobrescrevem os resultados anteriores, garantindo que o **sprite 0** (reservado ao jogador) domine obrigatoriamente sobre os demais em caso de sobreposição.
+* **Espelhamento e mapeamento de quadrantes:** o motor decodifica as *flags* de espelhamento (`flip_x`, `flip_y`), invertendo o vetor de deslocamento local (`15 − raw_dx`) e calculando o subquadrante correspondente para mapear a textura correta na ROM dedicada de sprites.
+
+### 5.3. Rasterizador Procedural de Polígonos (`rasterizador_poligonos.v`)
+
+O rasterizador desenha formas geométricas preenchidas (retângulos e triângulos) diretamente em hardware, eliminando a necessidade de texturas estáticas em memória para formas básicas.
+
+* **Retângulos:** renderizados por lógica combinacional direta, comparando se a coordenada atual do pixel está entre os limites dos cantos superior-esquerdo e inferior-direito.
+* **Triângulos e funções de aresta (*edge functions*):** o módulo implementa o produto vetorial entre arestas (funções $e_{01}$, $e_{12}$, $e_{20}$) para determinar de que lado de cada aresta o pixel testado se encontra; o pixel é preenchido apenas quando está do lado interno das três.
+* **Prevenção de *underflow* (aritmética com sinal):** as coordenadas de entrada são inteiros sem sinal de 8/9 bits (0 a 255/511). Uma subtração entre duas dessas coordenadas pode variar de −511 a +511, faixa que exige **11 bits em complemento de dois** (10 bits de magnitude + 1 de sinal) para representação sem perda. O *datapath* estende preventivamente as entradas para registradores assinados de 11 bits antes de calcular as diferenças, e o produto dessas diferenças (usado nas funções de aresta) é acumulado em barramentos de até 24 bits — evitando falhas silenciosas de rasterização por *overflow*/*underflow*.
+
+### 5.4. Pipeline de Atraso e o Compositor (`compositor.v`)
+
+A contabilidade completa de ciclos entre os três motores está detalhada na seção 4.5 — em resumo, o *pipeline* de compensação garante que sprite, polígono e background cheguem ao compositor no mesmo instante lógico, apesar de terem latências intrínsecas diferentes (0, 1 e 2 ciclos, respectivamente, antes da compensação).
+
+O compositor avalia os sinais já sincronizados e aplica a regra de transparência estrita (índice de cor `0` descartado) obedecendo à hierarquia oficial de prioridade visual:
+
+$$\text{Sprite} > \text{Polígono} > \text{Background}$$
+
+O pixel vencedor é mapeado diretamente para o formato de saída e enviado aos pinos analógicos do DAC VGA.
+
+---
+
+## 6. Recursos, Timing, Desempenho e Limitações
+
+### 6.1 Utilização de recursos da FPGA
+
+Números extraídos do relatório de compilação (`.fit.summary`) para o dispositivo `5CSEMA5F31C6`:
+
+| Recurso | Utilizado | Disponível | % |
+|---|---|---|---|
+| ALMs (*Adaptive Logic Modules*) | 279 | 32.070 | <1% |
+| Registradores | 213 | — | — |
+| Bits de memória de bloco (M10K) | 157.056 | 4.065.280 | 4% |
+| Blocos de RAM (M10K) | 20 | 397 | 5% |
+| Blocos DSP | 3 | 87 | 3% |
+| PLLs | 0 | 6 | 0% |
+| Pinos de I/O | 241 | 457 | 53% |
+
+O projeto usa uma fração pequena da capacidade lógica e de memória da Cyclone V — a maior parte da ocupação de recursos vem das ROMs de tile/sprite e da RAM do *tilemap*, não da lógica de controle. Os 3 blocos DSP são consumidos pelas multiplicações do rasterizador de polígonos (produto vetorial das funções de aresta) e pelo cálculo de `tilemap_addr = tile_row × 40`. Nenhum PLL é usado — o clock de vídeo é gerado por divisão simples (`clock_divider.v`, ver justificativa na seção 4.1), não por síntese de frequência.
+
+### 6.2 Análise de timing (TimeQuest, pós-correção do arquivo `.sdc`)
+
+| Clock | Período / Frequência | Setup slack | Hold slack | Pulse Width slack |
+|---|---|---|---|---|
+| `CLOCK_50` (base) | 20,000 ns / 50 MHz | +17,495 ns | -0,125 ns | +8,722 ns |
+| `clk25` (gerado, `÷2` de `CLOCK_50`) | 40,000 ns / 25 MHz | +26,049 ns | +0,011 ns | +18,782 ns |
+
+O fechamento de timing é confortável nos dois domínios de clock: as folgas de *setup* são grandes (17-26 ns de margem sobre um período de 20-40 ns), o que indica que o *datapath* opera com bastante espaço acima dos 25/50 MHz exigidos. O *design-wide TNS* (soma total de violações) é zero em setup, confirmando que não há caminho de dados violando o requisito de tempo de estabelecimento em nenhum dos dois clocks.
+
+**Violação isolada de *hold* em `CLOCK_50` (-0,125 ns, 1 caminho):** diferente de uma violação de *setup*, uma violação de *hold* não é corrigida reduzindo a frequência do clock — ela indica que um dado pode chegar rápido demais em relação à borda de captura. O único registrador do projeto que opera no domínio `CLOCK_50` (sem divisão) é o próprio flip-flop de *toggle* dentro do `clock_divider.v` (`clk_out <= ~clk_out`); todos os demais registradores do *datapath* já operam em `clk25`. Isso é consistente com uma violação de hold no laço de realimentação do próprio divisor de clock — um cenário comum e tipicamente inofensivo nesse tipo de circuito, já que o resto do sistema (onde o vídeo é de fato processado) roda inteiramente em `clk25`, domínio que está limpo em setup e hold. *Confirmação pendente:* abrir o caminho relatado em `Compilation Report → TimeQuest Timing Analyzer → Slow Model → Hold` e verificar se a origem/destino é de fato `clock_divider:u_clkdiv|clk_out` — se for, a violação pode ser documentada como conhecida e sem impacto funcional; caso contrário, é necessário investigar o registrador reportado.
+
+### 6.3 Gargalos e limitações conhecidas
+
+- **Paleta de cor fixa (RGB332)** em vez de RAM de paleta programável (seção 4.5/7.6) — decisão de simplificação orientada em aula, reduz a fidelidade de cor e a flexibilidade de reprogramação em tempo de execução.
+- **Prioridade de sprite implícita pelo índice**, não um campo de dado programável (seção 7.4) — limita a reordenação dinâmica de prioridade entre sprites sem realocar o sprite na RAM de atributos.
+- **Violação de hold isolada ao domínio `CLOCK_50`** (ver 6.2) — não afeta o domínio `clk25`, onde todo o processamento de vídeo ocorre, mas deve ser documentada como item conhecido.
+- **Endereçamento de tile via multiplicação** (`tile_row × 40`) consome recursos DSP que poderiam ser evitados com um tilemap de dimensão potência de 2 (ex.: 32×32), à custa de desperdiçar posições de mapa — trade-off aceito em favor de manter os 40×30 exigidos pelo enunciado.
+- **Interface de controle via `SW`/`KEY`** é, por natureza, um estímulo de bancada, não uma interface de comandos de 32 bits validada — a transição para MMIO (Fase 2) exigirá um decodificador de comandos ainda não implementado nesta entrega.
+
+---
+
+## 7. Levantamento de Requisitos e Status de Atendimento
+
+Os requisitos abaixo seguem a numeração original do enunciado (Problema #1, seção 4). Cada item foi conferido diretamente contra o RTL do repositório. Legenda:
+
+- ✅ Atendido
+- ⚠️ Parcialmente atendido (justificado)
+- ❌ Não atendido (justificado)
+
+### 7.1 Entradas e saídas
+
+- [x] ✅ Saída de vídeo em 640×480 pixels, ~60 Hz, via interface VGA da DE1-SoC
+- [x] ✅ Resolução lógica da cena de 320×240 pixels, com duplicação de pixels na saída (fator 2×2)
+- [x] ✅ Botões, chaves e LEDs usados exclusivamente para demonstração do núcleo, sem substituir a futura interface MMIO — sinais de `SW`/`KEY` isolados do restante do *datapath* em `top_video.v`
+
+### 7.2 Núcleo do coprocessador gráfico — Verilog
+
+- [x] ✅ Núcleo inteiramente descrito em Verilog
+- [x] ✅ Arquitetura modular, com separação clara entre controle (`mef_demonstracao`), *datapath*, memórias e motores gráficos (`motor_background`, `motor_sprites`, `rasterizador_poligonos`), e saída de vídeo (`vga_driver`)
+- [x] ✅ Registradores e memórias com estratégia definida de reinicialização/inicialização — reset síncrono (`posedge clk or posedge reset`) em todos os módulos sequenciais; ROMs inicializadas via arquivo `.mif`
+- [x] ✅ **Saída sem instabilidade visual, perda de sincronismo ou pixels indefinidos** — confirmado por análise de timing fechada via TimeQuest (seção 6.2): setup e *pulse width* limpos nos dois clocks; há uma violação isolada de *hold* restrita ao registrador interno do `clock_divider` (domínio `CLOCK_50`), sem impacto no domínio `clk25` onde o vídeo é processado (ver detalhes e ressalva em 6.2/6.3)
+
+### 7.3 Motor de background
+
+- [x] ✅ Camada de background baseada em *tilemap* de 40×30 entradas
+- [x] ✅ Tiles de 8×8 pixels em memória interna, com 256 padrões disponíveis (ROM de 14 bits de endereço = 16.384 posições = 256 × 64 pixels)
+- [x] ✅ Alteração do tile associado a cada posição do *tilemap*, em tempo real
+- [x] ✅ Deslocamento horizontal e vertical da camada, com tratamento de repetição (*wrap-around* por subtração do limite)
+- [x] ✅ Geração de índice de cor válido para cada pixel da região visível, sem interromper o fluxo de vídeo
+
+### 7.4 Motor de sprites
+
+- [x] ✅ Memória de atributos para no mínimo 32 sprites
+- [x] ✅ Sprites de 16×16 pixels, endereçados por quadrante na ROM de padrões de 8×8
+- [ ] ⚠️ **Atributos mínimos por sprite** — o registrador de 32 bits por sprite hoje contém apenas: habilitação, espelhamento X, espelhamento Y, índice do padrão gráfico (8 bits), posição Y (8 bits) e posição X (9 bits).
+  - ⚠️ **Prioridade por sprite**: hoje a prioridade é *implícita* pelo índice fixo no array (sprite 0 sempre vence), não é um atributo programável independente da posição na memória.
+  - ❌ **Seleção de paleta por sprite**: não se aplica, já que não há paleta programável no sistema (ver 7.6).
+- [x] ✅ Prioridade entre sprites que ocupam o mesmo pixel documentada e determinística (varredura decrescente de índice, sprite de menor índice vence)
+
+### 7.5 Rasterizador de polígonos
+
+- [x] ✅ Desenho de triângulos e retângulos preenchidos
+- [x] ✅ Aritmética inteira (extensão de sinal para 11 bits, evitando *underflow* nas funções de aresta)
+
+### 7.6 Compositor, paleta e saída VGA
+
+- [x] ✅ Composição, a cada pixel, das contribuições de background, polígonos e sprites
+- [x] ✅ No mínimo 3 níveis de prioridade entre as camadas, com regra documentada (Sprite > Polígono > Background)
+- [x] ✅ Transparência aplicada antes da seleção do pixel final (índice de cor `0` descartado em sprites e polígonos)
+- [ ] ❌ **Paleta programável de 256 entradas RGB** — não implementada. O índice de 8 bits é convertido para RGB por mapeamento fixo (RGB332: 3 bits R, 3 bits G, 2 bits B), decisão adotada por orientação do professor em aula para evitar a latência de leitura de uma RAM de paleta adicional. Tecnicamente, isso significa que o mapeamento cor↔índice **não é reprogramável em tempo de execução**, como o termo "paleta programável" implica. *Justificativa registrada oficialmente na seção 4.5 da Arquitetura e na seção 9 (Funcionalidades Não Atendidas).*
+
+---
+
+## 8. Verificação Funcional (Demonstração em Bancada)
+
+Como descrito na seção 7, a verificação deste primeiro problema foi conduzida por **demonstração dirigida em hardware**, usando as chaves (`SW`) e botões (`KEY`) da placa como estímulo de teste, e não por testbenches automatizados em simulação. O modo ativo é sempre selecionado por `SW[9:8]`, roteado combinacionalmente pelo módulo `mef_demonstracao.v`. Os registradores de cada camada (posição dos polígonos, conteúdo do *tilemap*, *scroll*) **não são reiniciados ao trocar de modo** — só voltam ao padrão com `KEY[0]` (reset) — o que permite configurar uma camada, mudar de modo, e ainda ver o resultado anterior compondo com as demais camadas.
+
+### 8.1 Modo `00` — Ocioso (IDLE)
+
+Todas as saídas de controle ficam em repouso. Nenhuma chave ou botão tem efeito sobre o conteúdo das camadas; usado para verificar a saída de vídeo estável logo após o reset (`KEY[0]`).
+
+### 8.2 Modo `01` — Background
+
+| Controle | Função | Faixa / passo |
+|---|---|---|
+| `SW[7] = 0` | Ativa o **modo edição** de tile | — |
+| `SW[7] = 1` | Ativa o **modo scroll** | — |
+| `SW[6:0]` (só em modo edição) | Índice do tile a gravar na posição do cursor | `0`–`127` — o bit 7 de `SW` precisa ficar em `0` para a escrita ser habilitada (`real_bg_wr_en`), então metade da ROM de tiles (índices 128–255) não é alcançável por este controle de demonstração, só por uma futura escrita via MMIO |
+| `KEY[2]` (modo edição) | Avança o cursor de escrita no *tilemap* | `bg_wr_addr + 1` |
+| `KEY[3]` (modo edição) | Retrocede o cursor de escrita | `bg_wr_addr − 1` |
+| `KEY[1]` (modo edição) | Grava o tile indicado por `SW[6:0]` na posição atual do cursor | — |
+| `SW[6] = 0` (modo scroll) | Seleciona rolagem no eixo X | — |
+| `SW[6] = 1` (modo scroll) | Seleciona rolagem no eixo Y | — |
+| `KEY[2]` / `KEY[3]` (modo scroll) | Incrementa / decrementa o deslocamento de câmera no eixo selecionado | ±2 pixels lógicos por pulso |
+
+### 8.3 Modo `10` — Polígonos
+
+| Controle | Função | Faixa / passo |
+|---|---|---|
+| `SW[7] = 0` | Seleciona o **retângulo** como forma ativa | — |
+| `SW[7] = 1` | Seleciona o **triângulo** como forma ativa | — |
+| `SW[6] = 0` | Movimento no eixo X | — |
+| `SW[6] = 1` | Movimento no eixo Y | — |
+| `KEY[2]` | Move a forma ativa no sentido positivo do eixo selecionado | +5 pixels lógicos por pulso |
+| `KEY[3]` | Move a forma ativa no sentido negativo do eixo selecionado | −5 pixels lógicos por pulso |
+| `SW[5:0]` | Valor de cor a gravar na forma ativa | `0`–`63` — os 2 bits mais significativos do índice de cor são forçados a `0` na escrita (`{2'b00, SW[5:0]}`), então apenas 64 dos 256 índices de cor são alcançáveis por este controle |
+| `KEY[1]` | Grava o valor de `SW[5:0]` como cor da forma ativa | — |
+
+*Retângulo padrão após reset:* 80×40 pixels lógicos, cor índice 5, posição inicial (50, 50).
+*Triângulo padrão após reset:* base 80 / altura 60 pixels lógicos, cor índice 15, posição inicial (200, 100).
+
+### 8.4 Modo `11` — Sprites
+
+Nesta atualização, o `controlador_sprite.v` passou a gerenciar **4 sprites controláveis** (`id_alvo` 0–3) em paralelo, cada um com posição, personagem e espelhamento próprios guardados internamente no controlador. `SW[5:4]` escolhe qual desses 4 sprites recebe os comandos no momento — os outros três permanecem parados na última posição configurada, o que permite posicionar vários sprites em pontos diferentes da tela ao longo da demonstração.
+
+| Controle | Função em modo movimento (`SW[7] = 0`) | Função em modo espelhamento (`SW[7] = 1`) |
+|---|---|---|
+| `SW[3]` | Move o sprite selecionado para **cima** | Liga o espelhamento vertical (`flip_y = 1`) |
+| `SW[2]` | Move o sprite selecionado para **baixo** | Desliga o espelhamento vertical (`flip_y = 0`) |
+| `SW[1]` | Move o sprite selecionado para **esquerda** | Liga o espelhamento horizontal (`flip_x = 1`) |
+| `SW[0]` | Move o sprite selecionado para **direita** | Desliga o espelhamento horizontal (`flip_x = 0`) |
+
+| Controle | Função | Faixa / passo |
+|---|---|---|
+| `SW[5:4]` | Seleciona qual dos 4 sprites (`id_alvo`) recebe os comandos de `SW[3:0]` | `0`–`3` |
+| `SW[7]` | Alterna entre modo movimento (`0`) e modo espelhamento (`1`) para o sprite selecionado — reaproveita os mesmos bits `SW[3:0]`, não é uma trava independente | — |
+| `SW[6]` | Avança o personagem do sprite selecionado, **por borda de subida** (é preciso abaixar e levantar a chave a cada passo, não basta deixá-la levantada) | `0`–`6` (7 personagens), volta a `0` após `6` |
+
+Notas de comportamento, verificadas diretamente no `controlador_sprite.v` e no `motor_sprites.v`:
+- O movimento/espelhamento é processado a ~20 Hz (`SPEED_LIMIT = 1.250.000` ciclos de `clk25`, um passo a cada 50 ms); cada passo de movimento é de **1 pixel lógico**.
+- A troca de personagem (`SW[6]`) tem prioridade sobre o movimento/espelhamento quando os dois acontecem no mesmo instante.
+- A posição de cada sprite é limitada por *hardware* aos limites da tela lógica menos o tamanho do sprite: `X ∈ [0, 304]`, `Y ∈ [0, 224]` (320×240 − 16×16).
+- Ao resetar (`KEY[0]`), os 4 sprites já nascem posicionados e habilitados: sprite 0 (jogador, personagem 0) em (100, 100); sprites 1–3 (personagens 1, 2 e 4, representando inimigos parados) em (200, 50), (50, 150) e (250, 180), respectivamente — os valores de reset em `motor_sprites.v` e `controlador_sprite.v` foram conferidos e são consistentes entre si.
+- A prioridade de sobreposição entre os 4 sprites segue a mesma regra da seção 5.2 (menor índice vence): sprite 0 > sprite 1 > sprite 2 > sprite 3.
+- Fora do modo `11`, os sprites ficam parados (`spr_d` zerado pela MEF) nas últimas posições configuradas — por isso o compositor consegue mostrar, no fechamento da demonstração, os sprites sobrepostos ao *background* editado e aos polígonos movidos nos modos anteriores, sem precisar voltar a eles.
+
+---
+
+## 9. Vídeo de demonstração dos testes no monitor
+
+Os vídeos a seguir demonstram o funcionamento do núcleo gráfico
+
+### 9.1 Scroll do backgound
+
+O vídeo mostra o scroll do background
+
+https://github.com/user-attachments/assets/9e914d6b-0c7d-481a-bbce-006fd07548e9
+
+### 9.2 Mudança do cor dos polígonos
+
+O vídeo mostra os polígonos mudando de cor
+
+https://github.com/user-attachments/assets/f49f7710-be9b-4d33-8d4b-558e28161a0f
+
+### 9.3 Movimento dos polígonos e teste dos sprites
+
+O vídeo mostra os polígonos se movimentando e os sprites sendo testado em todas os requisitos implmentados
+
+https://github.com/user-attachments/assets/cc448574-0143-4348-b8ff-167039884deb
+
+---
+
+## 10. Referências
+
+Patterson, D. A., & Hennessy, J. L. (2018). Computer Organization and Design. Cambridge, Ma Morgan Kaufman Publishers.
