@@ -262,16 +262,30 @@ Os requisitos abaixo seguem a numeração original do enunciado (Problema #1, se
 - [ ] ❌ **Paleta programável de 256 entradas RGB** — não implementada. O índice de 8 bits é convertido para RGB por mapeamento fixo (RGB332: 3 bits R, 3 bits G, 2 bits B), decisão adotada por orientação do professor em aula para evitar a latência de leitura de uma RAM de paleta adicional. Tecnicamente, isso significa que o mapeamento cor↔índice **não é reprogramável em tempo de execução**, como o termo "paleta programável" implica. *Justificativa registrada oficialmente na seção 4.5 da Arquitetura e na seção 9 (Funcionalidades Não Atendidas).*
 
 ---
+ 
+## 8. Instruções de Reprodução
+ 
+O fluxo de compilação e gravação segue o procedimento padrão do Quartus Prime, sem scripts ou passos adicionais:
+ 
+1. Baixe ou clone o repositório para uma pasta local.
+2. Abra o **Quartus Prime** (versão 23.1std.0 ou compatível com a família Cyclone V).
+3. Vá em **File → Open Project** e selecione o arquivo `PBLSD.qpf` na raiz do projeto.
+4. Compile o projeto em **Processing → Start Compilation** (ou `Ctrl+L`). O fluxo completo (síntese, *fitting*, *assembly* e análise de timing) deve concluir sem erros, gerando o arquivo `.sof` em `output_files/`.
+5. Conecte a placa **DE1-SoC** ao computador via cabo USB-Blaster e ligue-a.
+6. Abra **Tools → Programmer**, confirme que o *hardware setup* está apontando para o USB-Blaster, adicione o arquivo `.sof` gerado (`Add File`) e clique em **Start** para gravar a FPGA.
+7. Após a gravação, siga o roteiro de verificação da seção 8 para testar cada modo (`SW[9:8]`) e validar o comportamento descrito.
 
-## 8. Verificação Funcional (Demonstração em Bancada)
+---
+
+## 9. Verificação Funcional (Demonstração em Bancada)
 
 Como descrito na seção 7, a verificação deste primeiro problema foi conduzida por **demonstração dirigida em hardware**, usando as chaves (`SW`) e botões (`KEY`) da placa como estímulo de teste, e não por testbenches automatizados em simulação. O modo ativo é sempre selecionado por `SW[9:8]`, roteado combinacionalmente pelo módulo `mef_demonstracao.v`. Os registradores de cada camada (posição dos polígonos, conteúdo do *tilemap*, *scroll*) **não são reiniciados ao trocar de modo** — só voltam ao padrão com `KEY[0]` (reset) — o que permite configurar uma camada, mudar de modo, e ainda ver o resultado anterior compondo com as demais camadas.
 
-### 8.1 Modo `00` — Ocioso (IDLE)
+### 9.1 Modo `00` — Ocioso (IDLE)
 
 Todas as saídas de controle ficam em repouso. Nenhuma chave ou botão tem efeito sobre o conteúdo das camadas; usado para verificar a saída de vídeo estável logo após o reset (`KEY[0]`).
 
-### 8.2 Modo `01` — Background
+### 9.2 Modo `01` — Background
 
 | Controle | Função | Faixa / passo |
 |---|---|---|
@@ -285,7 +299,7 @@ Todas as saídas de controle ficam em repouso. Nenhuma chave ou botão tem efeit
 | `SW[6] = 1` (modo scroll) | Seleciona rolagem no eixo Y | — |
 | `KEY[2]` / `KEY[3]` (modo scroll) | Incrementa / decrementa o deslocamento de câmera no eixo selecionado | ±2 pixels lógicos por pulso |
 
-### 8.3 Modo `10` — Polígonos
+### 9.3 Modo `10` — Polígonos
 
 | Controle | Função | Faixa / passo |
 |---|---|---|
@@ -301,7 +315,7 @@ Todas as saídas de controle ficam em repouso. Nenhuma chave ou botão tem efeit
 *Retângulo padrão após reset:* 80×40 pixels lógicos, cor índice 5, posição inicial (50, 50).
 *Triângulo padrão após reset:* base 80 / altura 60 pixels lógicos, cor índice 15, posição inicial (200, 100).
 
-### 8.4 Modo `11` — Sprites
+### 9.4 Modo `11` — Sprites
 
 Nesta atualização, o `controlador_sprite.v` passou a gerenciar **4 sprites controláveis** (`id_alvo` 0–3) em paralelo, cada um com posição, personagem e espelhamento próprios guardados internamente no controlador. `SW[5:4]` escolhe qual desses 4 sprites recebe os comandos no momento — os outros três permanecem parados na última posição configurada, o que permite posicionar vários sprites em pontos diferentes da tela ao longo da demonstração.
 
@@ -328,23 +342,23 @@ Notas de comportamento, verificadas diretamente no `controlador_sprite.v` e no `
 
 ---
 
-## 9. Vídeo de demonstração dos testes no monitor
+## 10. Vídeo de demonstração dos testes no monitor
 
 Os vídeos a seguir demonstram o funcionamento do núcleo gráfico
 
-### 9.1 Scroll do backgound
+### 10.1 Scroll do backgound
 
 O vídeo mostra o scroll do background
 
 https://github.com/user-attachments/assets/9e914d6b-0c7d-481a-bbce-006fd07548e9
 
-### 9.2 Mudança do cor dos polígonos
+### 10.2 Mudança do cor dos polígonos
 
 O vídeo mostra os polígonos mudando de cor
 
 https://github.com/user-attachments/assets/f49f7710-be9b-4d33-8d4b-558e28161a0f
 
-### 9.3 Movimento dos polígonos e teste dos sprites
+### 10.3 Movimento dos polígonos e teste dos sprites
 
 O vídeo mostra os polígonos se movimentando e os sprites sendo testado em todas os requisitos implmentados
 
@@ -352,6 +366,6 @@ https://github.com/user-attachments/assets/cc448574-0143-4348-b8ff-167039884deb
 
 ---
 
-## 10. Referências
+## 11. Referências
 
 Patterson, D. A., & Hennessy, J. L. (2018). Computer Organization and Design. Cambridge, Ma Morgan Kaufman Publishers.
