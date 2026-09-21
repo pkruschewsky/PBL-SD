@@ -1,0 +1,41 @@
+vmodule banco_registradores (
+    input wire clk,
+    input wire RegWrite,          // Habilita a escrita no banco
+
+    input wire [4:0] read_reg1,   // Endereço de 5 bits para o Registrador Fonte 1 (Rn)
+    input wire [4:0] read_reg2,   // Endereço de 5 bits para o Registrador Fonte 2 (Rm)
+    input wire [4:0] write_reg,   // Endereço de 5 bits para o Registrador de Destino (Rd)
+
+    input wire [31:0] write_data, // Dado de 32 bits a ser gravado no destino
+
+    output wire [31:0] read_data1, // Saída do Registrador 1 para a ULA ou Datapath
+    output wire [31:0] read_data2  // Saída do Registrador 2 para a ULA ou Datapath
+);
+
+    // Declaração da matriz de 32 registradores, cada um com 32 bits de largura
+    // O índice de 0 designa o bit menos significativo de cada registrador
+    reg [31:0] registerfile [0:31]; 
+    
+    //---------------------------------------------------------
+    // LEITURA COMBINACIONAL
+    //---------------------------------------------------------
+    // A leitura dos dados é combinacional: o dado sai assim que o endereço chega.
+    // Implementamos a trava no R0: Se o endereço for 5'b00000, a saída é 0.
+    // Caso contrário, retorna o valor armazenado na posição correspondente.
+    assign read_data1 = (read_reg1 == 5'b00000) ? 32'd0 : registerfile[read_reg1];
+    assign read_data2 = (read_reg2 == 5'b00000) ? 32'd0 : registerfile[read_reg2];
+
+    //---------------------------------------------------------
+    // ESCRITA SEQUENCIAL (Síncrona)
+    //---------------------------------------------------------
+    // A gravação ocorre apenas na borda de subida do clock e se RegWrite estiver em nível lógico 1
+    always @(posedge clk) begin
+        if (RegWrite) begin
+            // Impede a gravação no registrador 0, mantendo sua integridade como constante zero
+            if (write_reg != 5'b00000) begin
+                registerfile[write_reg] <= write_data;
+            end
+        end
+    end
+
+endmodule
