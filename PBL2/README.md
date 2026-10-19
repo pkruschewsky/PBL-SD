@@ -403,7 +403,7 @@ Legenda: ✅ Atendido · ⚠️ Parcialmente atendido (justificado) · ❌ Não 
 PBL2_Coprocessador_Grafico/
 ├── README.md           este relatório
 ├── imagens/            figuras do relatório
-├── videos/             vídeo da demonstração na placa
+├── videos/             vídeos da demonstração na placa
 ├── quartus/            projeto Quartus completo (soc_system.qpf), RTL em quartus/rtl/
 │   └── output_files/   soc_system.sof e relatórios de compilação e timing
 ├── software/
@@ -532,7 +532,9 @@ A demonstração em Assembly ARM (`demo_arm.s`, com o programa da ISA `demo.asm`
 
 ---
 
-## 12. Vídeo de demonstração
+## 12. Vídeos de demonstração
+
+### 12.1. Loop de instruções
 
 O vídeo abaixo foi gravado na bancada, com a DE1-SoC ligada ao monitor pela saída VGA. Ele mostra um loop de instruções sendo enviado pelo ARM ao coprocessador. O objetivo é apenas mostrar que as instruções estavam chegando e sendo executadas corretamente: os sprites e o retângulo azul se movem pela tela, junto com o triângulo vermelho desenhado pelo rasterizador.
 
@@ -542,6 +544,39 @@ O vídeo abaixo foi gravado na bancada, com a DE1-SoC ligada ao monitor pela sa�
   </a>
 </p>
 <p align="center"><em>Clique na imagem para abrir o vídeo (<code>videos/demonstracao_placa.mp4</code>).</em></p>
+
+### 12.2. Sprites e polígonos em movimento
+
+Cena com um triângulo e um retângulo nos slots de polígono e dois sprites. Os sprites mudam de posição a cada quadro e passam pela frente do triângulo, mostrando a prioridade entre as camadas.
+
+<p align="center">
+  <a href="videos/demonstracao_2.mp4">
+    <img src="imagens/video_2.jpg" alt="Sprites e polígonos em movimento" width="60%">
+  </a>
+</p>
+<p align="center"><em>Clique na imagem para abrir o vídeo (<code>videos/demonstracao_2.mp4</code>).</em></p>
+
+### 12.3. Triângulo retângulo e animação
+
+Outra versão da cena, com o triângulo desenhado como triângulo retângulo. Os sprites e o retângulo azul continuam se movendo sobre o fundo.
+
+<p align="center">
+  <a href="videos/demonstracao_3.mp4">
+    <img src="imagens/video_3.jpg" alt="Triângulo retângulo e animação" width="60%">
+  </a>
+</p>
+<p align="center"><em>Clique na imagem para abrir o vídeo (<code>videos/demonstracao_3.mp4</code>).</em></p>
+
+### 12.4. Animação contínua
+
+A cena com o triângulo retângulo em funcionamento por mais tempo: os sprites e o retângulo azul seguem em movimento, passando pela frente e ao redor dos polígonos.
+
+<p align="center">
+  <a href="videos/demonstracao_4.mp4">
+    <img src="imagens/video_4.jpg" alt="Animação contínua" width="60%">
+  </a>
+</p>
+<p align="center"><em>Clique na imagem para abrir o vídeo (<code>videos/demonstracao_4.mp4</code>).</em></p>
 
 ---
 
