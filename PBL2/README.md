@@ -2,7 +2,7 @@
 TEC499 - MI SISTEMAS DIGITAIS · Problema 2
 
 *Componentes do grupo:*
-* Davi Freitas Queiroz (https://github.com/daviqueirozzcomp)
+* Davi Freitas de Sousa Queiroz (https://github.com/daviqueirozzcomp)
 * Pedro Haywanon Santos Araujo (https://github.com/phaywanon)
 * Pedro Kruschewsky Lordelo (https://github.com/pkruschewsky)
 
